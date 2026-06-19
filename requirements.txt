@@ -1,0 +1,8 @@
+# CiteKG graph embedding pipeline requirements
+rdflib>=6.3.2
+torch>=2.1.0
+transformers>=4.38.0
+scipy>=1.11.0        # for sparse × sparse matrix multiply in step 4
+numpy>=1.24.0
+# Optional but recommended for GPU acceleration:
+# torch-scatter torch-sparse  (PyG dependencies for later GNN steps)
