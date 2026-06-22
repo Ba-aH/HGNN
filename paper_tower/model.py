@@ -1,258 +1,312 @@
-# =============================================================================
-# SOURCE: hgb/model.py — ICT-GIMLab/SeHGNN
-#         https://github.com/ICT-GIMLab/SeHGNN
-#         Paper: "Simple and Efficient Heterogeneous Graph Neural Network"
-#                Yang et al., AAAI 2023 — https://arxiv.org/abs/2207.02547
-#
-# COPIED VERBATIM. NO MODIFICATIONS MADE IN THIS FILE.
-#
-# Classes present in this file:
-# ------------------------------
-#   Transformer         — cross-metapath semantic fusion (paper: Transformer-based
-#                         Semantic Fusion, equations q/k/v + softmax + residual)
-#   LinearPerMetapath   — batched per-metapath linear projection
-#   SeHGNN              — full model: projection → fusion → classification head
-#
-# What we will keep for LCR (paper tower):
-#   ✓ Transformer         (semantic fusion across metapaths, unchanged)
-#   ✓ LinearPerMetapath   (per-metapath MLP projection, unchanged)
-#   ✗ SeHGNN.task_mlp     (classification head — will be removed)
-#   ✗ SeHGNN.labels_embeding / label_dict handling (label propagation — not used in LCR)
-#   ~ SeHGNN              (will be adapted into PaperTower class in a later step)
-#
-# MODIFICATIONS PLANNED (tracked here, applied in next step):
-#   [ ] Remove task_mlp (CrossEntropyLoss classification head)
-#   [ ] Remove labels_embeding and label_dict from forward()
-#   [ ] Replace the final MLP with a projection head → fixed embedding dim
-#   [ ] Rename SeHGNN → PaperTower
-#   [ ] Expose embed_dim as explicit output size hyperparameter
-# =============================================================================
+"""
+paper_tower/model.py
+--------------------
+PaperTower: SeHGNN-derived encoder that maps pre-propagated metapath features
+into a fixed-dim L2-normalised embedding suitable for contrastive retrieval.
+
+Inputs (at forward time):
+    feat_dict : dict[str -> Tensor[B, nfeat]]
+        Keys must match feat_keys supplied at construction time (e.g. "P", "PP", "PCP").
+        Values are already row-normalised, propagated features — NO adjacency matrices
+        needed here; propagation was done offline in step4_assemble_and_propagate.py.
+
+Output:
+    Tensor[B, embed_dim], L2-normalised.
+
+Architecture (kept from SeHGNN hgb/model.py):
+    LinearPerMetapath  — per-metapath MLP projection  [B, M, nfeat] → [B, M, hidden]
+    Transformer        — cross-metapath semantic fusion
+    fc_after_concat    — flatten + project             [B, M*hidden] → [B, hidden]
+
+Added for LCR:
+    proj_head          — Linear(hidden, embed_dim)
+    L2 normalisation   — F.normalize(..., dim=-1)
+
+Removed from SeHGNN:
+    task_mlp           — classification head (wrong task)
+    labels_embeding    — label propagation (no node labels in LCR)
+    embeding           — node-type embedding lookup (we receive dense tensors directly)
+    dataset / nclass / tgt_type arguments
+"""
 
 import math
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_sparse import SparseTensor
 
 
-def xavier_uniform_(tensor, gain=1.):
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _xavier_uniform_(tensor, gain=1.0):
+    """Xavier uniform init that works for 3-D weight tensors (LinearPerMetapath)."""
     fan_in, fan_out = tensor.size()[-2:]
     std = gain * math.sqrt(2.0 / float(fan_in + fan_out))
-    a = math.sqrt(3.0) * std  # Calculate uniform bounds from standard deviation
+    a = math.sqrt(3.0) * std
     return torch.nn.init._no_grad_uniform_(tensor, -a, a)
 
 
-class Transformer(nn.Module):
-    '''
-        The transformer-based semantic fusion in SeHGNN.
-    '''
-    def __init__(self, n_channels, num_heads=1, att_drop=0., act='none'):
-        super(Transformer, self).__init__()
-        self.n_channels = n_channels
-        self.num_heads = num_heads
-        assert self.n_channels % (self.num_heads * 4) == 0
+def _unfold_nested_list(x):
+    return sum(x, [])
 
-        self.query = nn.Linear(self.n_channels, self.n_channels//4)
-        self.key   = nn.Linear(self.n_channels, self.n_channels//4)
-        self.value = nn.Linear(self.n_channels, self.n_channels)
 
-        self.gamma = nn.Parameter(torch.tensor([0.]))
-        self.att_drop = nn.Dropout(att_drop)
-        if act == 'sigmoid':
-            self.act = torch.nn.Sigmoid()
-        elif act == 'relu':
-            self.act = torch.nn.ReLU()
-        elif act == 'leaky_relu':
-            self.act = torch.nn.LeakyReLU(0.2)
-        elif act == 'none':
-            self.act = lambda x: x
-        else:
-            assert 0, f'Unrecognized activation function {act} for class Transformer'
-
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        for k, v in self._modules.items():
-            if hasattr(v, 'reset_parameters'):
-                v.reset_parameters()
-        nn.init.zeros_(self.gamma)
-
-    def forward(self, x, mask=None):
-        B, M, C = x.size() # batchsize, num_metapaths, channels
-        H = self.num_heads
-        if mask is not None:
-            assert mask.size() == torch.Size((B, M))
-
-        f = self.query(x).view(B, M, H, -1).permute(0,2,1,3) # [B, H, M, -1]
-        g = self.key(x).view(B, M, H, -1).permute(0,2,3,1)   # [B, H, -1, M]
-        h = self.value(x).view(B, M, H, -1).permute(0,2,1,3) # [B, H, M, -1]
-
-        beta = F.softmax(self.act(f @ g / math.sqrt(f.size(-1))), dim=-1) # [B, H, M, M(normalized)]
-        beta = self.att_drop(beta)
-        if mask is not None:
-            beta = beta * mask.view(B, 1, 1, M)
-            beta = beta / (beta.sum(-1, keepdim=True) + 1e-12)
-
-        o = self.gamma * (beta @ h) # [B, H, M, -1]
-        return o.permute(0,2,1,3).reshape((B, M, C)) + x
-
+# ---------------------------------------------------------------------------
+# Sub-modules (unchanged from SeHGNN)
+# ---------------------------------------------------------------------------
 
 class LinearPerMetapath(nn.Module):
-    '''
-        Linear projection per metapath for feature projection in SeHGNN.
-    '''
-    def __init__(self, cin, cout, num_metapaths):
-        super(LinearPerMetapath, self).__init__()
+    """Independent linear projection for each metapath channel."""
+
+    def __init__(self, cin: int, cout: int, num_metapaths: int):
+        super().__init__()
         self.cin = cin
         self.cout = cout
         self.num_metapaths = num_metapaths
 
-        self.W = nn.Parameter(torch.randn(self.num_metapaths, self.cin, self.cout))
-        self.bias = nn.Parameter(torch.zeros(self.num_metapaths, self.cout))
-
+        self.W = nn.Parameter(torch.randn(num_metapaths, cin, cout))
+        self.bias = nn.Parameter(torch.zeros(num_metapaths, cout))
         self.reset_parameters()
 
     def reset_parameters(self):
         gain = nn.init.calculate_gain("relu")
-        xavier_uniform_(self.W, gain=gain)
+        _xavier_uniform_(self.W, gain=gain)
         nn.init.zeros_(self.bias)
 
-    def forward(self, x):
-        return torch.einsum('bcm,cmn->bcn', x, self.W) + self.bias.unsqueeze(0)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: [B, M, cin]  →  [B, M, cout]
+        return torch.einsum("bcm,cmn->bcn", x, self.W) + self.bias.unsqueeze(0)
 
 
-unfold_nested_list = lambda x: sum(x, [])
+class Transformer(nn.Module):
+    """Cross-metapath self-attention (semantic fusion) from SeHGNN."""
 
-class SeHGNN(nn.Module):
-    '''
-        The SeHGNN model.
-    '''
-    def __init__(self, dataset, nfeat, hidden, nclass, feat_keys, label_feat_keys, tgt_type,
-                 dropout, input_drop, att_drop, n_fp_layers, n_task_layers, act,
-                 residual=False, data_size=None, drop_metapath=0., num_heads=1):
-        super(SeHGNN, self).__init__()
-        self.dataset = dataset
-        self.feat_keys = sorted(feat_keys)
-        self.label_feat_keys = sorted(label_feat_keys)
-        self.num_channels = num_channels = len(self.feat_keys) + len(self.label_feat_keys)
-        self.tgt_type = tgt_type
-        self.residual = residual
-
-        self.input_drop = nn.Dropout(input_drop)
-
-        self.data_size = data_size
-        self.embeding = nn.ParameterDict({})
-        for k, v in data_size.items():
-            self.embeding[str(k)] = nn.Parameter(torch.Tensor(v, nfeat))
-
-        if len(self.label_feat_keys):
-            self.labels_embeding = nn.ParameterDict({})
-            for k in self.label_feat_keys:
-                self.labels_embeding[k] = nn.Parameter(torch.Tensor(nclass, nfeat))
-        else:
-            self.labels_embeding = {}
-
-        self.feature_projection = nn.Sequential(
-            *([LinearPerMetapath(nfeat, hidden, num_channels),
-               nn.LayerNorm([num_channels, hidden]),
-               nn.PReLU(),
-               nn.Dropout(dropout),]
-            + unfold_nested_list([[
-               LinearPerMetapath(hidden, hidden, num_channels),
-               nn.LayerNorm([num_channels, hidden]),
-               nn.PReLU(),
-               nn.Dropout(dropout),] for _ in range(n_fp_layers - 1)])
-            )
+    def __init__(self, n_channels: int, num_heads: int = 1, att_drop: float = 0.0, act: str = "none"):
+        super().__init__()
+        self.n_channels = n_channels
+        self.num_heads = num_heads
+        assert n_channels % (num_heads * 4) == 0, (
+            f"n_channels ({n_channels}) must be divisible by num_heads*4 ({num_heads*4})"
         )
 
-        self.semantic_fusion = Transformer(hidden, num_heads=num_heads, att_drop=att_drop, act=act)
-        self.fc_after_concat = nn.Linear(num_channels * hidden, hidden)
+        self.query = nn.Linear(n_channels, n_channels // 4)
+        self.key   = nn.Linear(n_channels, n_channels // 4)
+        self.value = nn.Linear(n_channels, n_channels)
 
-        if self.residual:
-            self.res_fc = nn.Linear(nfeat, hidden)
+        self.gamma = nn.Parameter(torch.tensor([0.0]))
+        self.att_drop = nn.Dropout(att_drop)
 
-        if self.dataset not in ['IMDB', 'Freebase']:
-            self.task_mlp = nn.Sequential(
-                *([nn.PReLU(),
-                   nn.Dropout(dropout),]
-                + unfold_nested_list([[
-                   nn.Linear(hidden, hidden),
-                   nn.BatchNorm1d(hidden, affine=False),
-                   nn.PReLU(),
-                   nn.Dropout(dropout),] for _ in range(n_task_layers - 1)])
-                + [nn.Linear(hidden, nclass),
-                   nn.BatchNorm1d(nclass, affine=False, track_running_stats=False)]
-                )
-            )
+        if act == "sigmoid":
+            self.act = nn.Sigmoid()
+        elif act == "relu":
+            self.act = nn.ReLU()
+        elif act == "leaky_relu":
+            self.act = nn.LeakyReLU(0.2)
+        elif act == "none":
+            self.act = lambda x: x
         else:
-            self.task_mlp = nn.ModuleList(
-                [nn.Sequential(
-                    nn.PReLU(),
-                    nn.Dropout(dropout))]
-                + [nn.Sequential(
-                    nn.Linear(hidden, hidden),
-                    nn.BatchNorm1d(hidden, affine=False),
-                    nn.PReLU(),
-                    nn.Dropout(dropout)) for _ in range(n_task_layers - 1)]
-                + [nn.Sequential(
-                    nn.Linear(hidden, nclass),
-                    nn.LayerNorm(nclass, elementwise_affine=False),
-                    )]
-            )
+            raise ValueError(f"Unrecognised activation '{act}' for Transformer")
 
         self.reset_parameters()
 
     def reset_parameters(self):
-        for k, v in self._modules.items():
-            if isinstance(v, nn.ParameterDict):
-                for _k, _v in v.items():
-                    _v.data.uniform_(-0.5, 0.5)
-            elif isinstance(v, nn.ModuleList):
-                for block in v:
-                    if isinstance(block, nn.Sequential):
-                        for layer in block:
-                            if hasattr(layer, 'reset_parameters'):
-                                layer.reset_parameters()
-                    elif hasattr(block, 'reset_parameters'):
-                        block.reset_parameters()
-            elif isinstance(v, nn.Sequential):
-                for layer in v:
-                    if hasattr(layer, 'reset_parameters'):
-                        layer.reset_parameters()
-            elif hasattr(v, 'reset_parameters'):
-                v.reset_parameters()
+        for m in [self.query, self.key, self.value]:
+            m.reset_parameters()
+        nn.init.zeros_(self.gamma)
 
-    def forward(self, batch, feature_dict, label_dict={}, mask=None):
-        if isinstance(feature_dict[self.tgt_type], torch.Tensor):
-            features = {k: self.input_drop(x @ self.embeding[k]) for k, x in feature_dict.items()}
-        elif isinstance(feature_dict[self.tgt_type], SparseTensor):
-            # Freebase has so many metapaths that we use feature projection per target node type instead of per metapath
-            features = {k: self.input_drop(x @ self.embeding[k[-1]]) for k, x in feature_dict.items()}
-        else:
-            assert 0
+    def forward(self, x: torch.Tensor, mask=None) -> torch.Tensor:
+        B, M, C = x.size()   # batch, num_metapaths, channels
+        H = self.num_heads
 
-        B = num_node = features[self.tgt_type].shape[0]
-        C = self.num_channels
-        D = features[self.tgt_type].shape[1]
+        f = self.query(x).view(B, M, H, -1).permute(0, 2, 1, 3)   # [B, H, M, C//4H]
+        g = self.key(x).view(B, M, H, -1).permute(0, 2, 3, 1)     # [B, H, C//4H, M]
+        h = self.value(x).view(B, M, H, -1).permute(0, 2, 1, 3)   # [B, H, M, C//H]
 
-        labels = {k: self.input_drop(x @ self.labels_embeding[k]) for k, x in label_dict.items()}
+        beta = F.softmax(self.act(f @ g / math.sqrt(f.size(-1))), dim=-1)  # [B, H, M, M]
+        beta = self.att_drop(beta)
+        if mask is not None:
+            assert mask.size() == torch.Size((B, M))
+            beta = beta * mask.view(B, 1, 1, M)
+            beta = beta / (beta.sum(-1, keepdim=True) + 1e-12)
 
-        x = [features[k] for k in self.feat_keys] + [labels[k] for k in self.label_feat_keys]
-        x = torch.stack(x, dim=1) # [B, C, D]
+        o = self.gamma * (beta @ h)                                 # [B, H, M, C//H]
+        return o.permute(0, 2, 1, 3).reshape(B, M, C) + x          # residual
+
+
+# ---------------------------------------------------------------------------
+# PaperTower
+# ---------------------------------------------------------------------------
+
+class PaperTower(nn.Module):
+    """
+    Encodes a batch of papers (identified by their pre-propagated metapath
+    feature vectors) into a single L2-normalised embedding vector.
+
+    Parameters
+    ----------
+    feat_keys : list[str]
+        Ordered list of metapath feature keys, e.g. ["P", "PP", "PCP"].
+        The order must match the order of tensors in feat_dict at forward time.
+    nfeat : int
+        Input feature dimension (768 for SciBERT).
+    hidden : int
+        Hidden dimension inside the Transformer and projection layers.
+    embed_dim : int
+        Final embedding dimension (shared with ContextTower).
+    n_fp_layers : int
+        Number of LinearPerMetapath MLP layers (≥1).
+    dropout : float
+        Dropout on activations.
+    input_drop : float
+        Dropout applied to input features before projection.
+    att_drop : float
+        Attention dropout inside the Transformer.
+    num_heads : int
+        Number of attention heads in the Transformer.
+    act : str
+        Activation inside Transformer attention ('none' | 'relu' | 'leaky_relu' | 'sigmoid').
+    residual : bool
+        If True, add a skip connection from mean(inputs) → hidden before projection head.
+    """
+
+    def __init__(
+        self,
+        feat_keys: list,
+        nfeat: int = 768,
+        hidden: int = 512,
+        embed_dim: int = 256,
+        n_fp_layers: int = 2,
+        dropout: float = 0.5,
+        input_drop: float = 0.1,
+        att_drop: float = 0.0,
+        num_heads: int = 1,
+        act: str = "none",
+        residual: bool = False,
+    ):
+        super().__init__()
+
+        self.feat_keys = sorted(feat_keys)   # canonical order
+        self.num_channels = M = len(self.feat_keys)
+        self.residual = residual
+
+        self.input_drop = nn.Dropout(input_drop)
+
+        # --- Feature projection: M independent MLPs (LinearPerMetapath) ---
+        assert n_fp_layers >= 1, "n_fp_layers must be >= 1"
+        layers = [
+            LinearPerMetapath(nfeat, hidden, M),
+            nn.LayerNorm([M, hidden]),
+            nn.PReLU(),
+            nn.Dropout(dropout),
+        ]
+        for _ in range(n_fp_layers - 1):
+            layers += [
+                LinearPerMetapath(hidden, hidden, M),
+                nn.LayerNorm([M, hidden]),
+                nn.PReLU(),
+                nn.Dropout(dropout),
+            ]
+        self.feature_projection = nn.Sequential(*layers)
+
+        # --- Cross-metapath semantic fusion ---
+        self.semantic_fusion = Transformer(hidden, num_heads=num_heads, att_drop=att_drop, act=act)
+
+        # --- Flatten + project fused metapath vectors ---
+        self.fc_after_concat = nn.Linear(M * hidden, hidden)
+
+        # --- Optional residual from raw input ---
+        if residual:
+            self.res_fc = nn.Linear(nfeat, hidden, bias=False)
+
+        # --- Projection head → shared embedding space ---
+        self.proj_head = nn.Linear(hidden, embed_dim)
+
+        self.reset_parameters()
+
+    # ------------------------------------------------------------------
+    def reset_parameters(self):
+        gain = nn.init.calculate_gain("relu")
+
+        for module in self.feature_projection:
+            if hasattr(module, "reset_parameters"):
+                module.reset_parameters()
+
+        self.semantic_fusion.reset_parameters()
+
+        nn.init.xavier_uniform_(self.fc_after_concat.weight, gain=gain)
+        nn.init.zeros_(self.fc_after_concat.bias)
+
+        if self.residual:
+            nn.init.xavier_uniform_(self.res_fc.weight, gain=gain)
+
+        nn.init.xavier_uniform_(self.proj_head.weight, gain=gain)
+        nn.init.zeros_(self.proj_head.bias)
+
+    # ------------------------------------------------------------------
+    def forward(self, feat_dict: dict) -> torch.Tensor:
+        """
+        Parameters
+        ----------
+        feat_dict : dict[str -> Tensor[B, nfeat]]
+            Pre-propagated metapath features for a batch of B papers.
+            Keys must be a superset of self.feat_keys.
+
+        Returns
+        -------
+        Tensor[B, embed_dim], L2-normalised.
+        """
+        # Stack in canonical key order → [B, M, nfeat]
+        x = torch.stack([feat_dict[k] for k in self.feat_keys], dim=1)
+        x = self.input_drop(x)
+
+        # Optionally stash mean input for residual
+        if self.residual:
+            x_mean = x.mean(dim=1)   # [B, nfeat]
+
+        # Per-metapath MLP projection → [B, M, hidden]
         x = self.feature_projection(x)
 
-        x = self.semantic_fusion(x, mask=None).transpose(1,2)
+        # Cross-metapath attention → [B, M, hidden]
+        x = self.semantic_fusion(x)
 
+        # Flatten + project → [B, hidden]
+        B = x.size(0)
         x = self.fc_after_concat(x.reshape(B, -1))
-        if self.residual:
-            x = x + self.res_fc(features[self.tgt_type])
 
-        if self.dataset not in ['IMDB', 'Freebase']:
-            return self.task_mlp(x)
-        else:
-            x = self.task_mlp[0](x)
-            for i in range(1, len(self.task_mlp)-1):
-                x = self.task_mlp[i](x) + x
-            x = self.task_mlp[-1](x)
-            return x
+        if self.residual:
+            x = x + self.res_fc(x_mean)
+
+        # Projection head → [B, embed_dim]
+        x = self.proj_head(x)
+
+        # L2 normalise → unit sphere
+        return F.normalize(x, p=2, dim=-1)
+
+if __name__ == "__main__":
+    import torch
+
+    feat_keys = ["P", "PP", "PCP"]
+    B = 4          # batch of 4 papers
+    nfeat = 768
+    embed_dim = 256
+
+    model = PaperTower(
+        feat_keys=feat_keys,
+        nfeat=nfeat,
+        hidden=512,
+        embed_dim=embed_dim,
+        n_fp_layers=2,
+    )
+    print(model)
+    print(f"\nTotal params: {sum(p.numel() for p in model.parameters()):,}")
+
+    # Fake metapath features (normally loaded from .pt files)
+    feat_dict = {k: torch.randn(B, nfeat) for k in feat_keys}
+
+    out = model(feat_dict)
+    print(f"\nInput:  {B} papers, {len(feat_keys)} metapaths, each {nfeat}-dim")
+    print(f"Output: {out.shape}  (expected [{B}, {embed_dim}])")
+
+    # Check L2 normalisation
+    norms = out.norm(dim=-1)
+    print(f"Output norms: {norms.tolist()}  (expected all ≈ 1.0)")

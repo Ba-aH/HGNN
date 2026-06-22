@@ -2,3 +2,41 @@ venv
 shared/data_prep/merged-kg.ttl
 
 
+# =============================================================================
+# LCR / HGNN project — .gitignore
+# =============================================================================
+
+# --- Large data files (do not push) ---
+shared/data_prep/*.pt
+shared/data_prep/all_contexts.json
+shared/data_prep/merged-kg.ttl
+shared/data_prep/context_flat.json
+
+# --- Checkpoints ---
+checkpoints/
+
+# --- Python cache ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+*.ipynb
+
+# --- Virtual environments ---
+env/
+venv/
+.env
+*.egg-info/
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- Logs & temp ---
+*.log
+*.tmp
+tmp/

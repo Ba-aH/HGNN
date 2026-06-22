@@ -22,6 +22,23 @@ from pathlib import Path
 
 import torch
 
+
+def to_torch_sparse_tensor(sp: torch.Tensor):
+    """Convert native PyTorch sparse COO to torch_sparse.SparseTensor if needed."""
+    try:
+        import torch_sparse
+        sp = sp.coalesce().cpu()
+        row, col = sp.indices()
+        value = sp.values()
+        return torch_sparse.SparseTensor(
+            row=row, col=col, value=value, 
+            sparse_sizes=sp.shape
+        )
+    except ImportError:
+        print("torch_sparse not installed — keeping native sparse tensors")
+        return sp
+
+        
 OUT_DIR = Path(".")
 
 # ── Load index ────────────────────────────────────────────────────────────────
@@ -59,6 +76,11 @@ print("Loading adjacency matrices …")
 adj_PP        = torch.load(OUT_DIR / "adj_PP.pt").coalesce()         # [N, N]
 adj_CP_citing = torch.load(OUT_DIR / "adj_CP_citing.pt").coalesce()  # [C, N]
 adj_CP_cited  = torch.load(OUT_DIR / "adj_CP_cited.pt").coalesce()   # [C, N]
+
+# Convert for compatibility (not sure of it) 
+# adj_PP        = to_torch_sparse_tensor(adj_PP)
+# adj_CP_citing = to_torch_sparse_tensor(adj_CP_citing)
+# adj_CP_cited  = to_torch_sparse_tensor(adj_CP_cited)
 
 N_citations = adj_CP_citing.shape[0]
 print(f"  adj_PP        {tuple(adj_PP.shape)}  nnz={adj_PP._nnz():,}")

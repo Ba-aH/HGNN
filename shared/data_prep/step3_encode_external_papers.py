@@ -38,7 +38,7 @@ DEVICE     = "cuda" if torch.cuda.is_available() else "cpu"
 # ── Load graph (needed for context passage text) ──────────────────────────────
 print("Loading merged.ttl …")
 g = Graph()
-g.parse("merged.ttl", format="turtle")
+g.parse("merged-kg.ttl", format="turtle")
 print(f"  {len(g):,} triples")
 
 # ── Load index ────────────────────────────────────────────────────────────────
