@@ -1,6 +1,7 @@
 venv
 shared/data_prep/merged-kg.ttl
 
+# git push https://Ba-aH:YOUR_TOKEN_HERE@github.com/Ba-aH/HGNN.git main
 
 # =============================================================================
 # LCR / HGNN project — .gitignore
@@ -12,8 +13,11 @@ shared/data_prep/all_contexts.json
 shared/data_prep/merged-kg.ttl
 shared/data_prep/context_flat.json
 
+
 # --- Checkpoints ---
 checkpoints/
+checkpoints1/
+checkpoints2/
 
 # --- Python cache ---
 __pycache__/

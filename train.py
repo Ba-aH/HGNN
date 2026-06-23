@@ -18,13 +18,11 @@ Evaluation metrics: Recall@K (K=1,5,10,20), MRR, nDCG@10
 
 Usage:
     python train.py \
-        --data_root    ~/HGNN/shared/data_prep \
-        --paper_tower  ~/HGNN/paper_tower \
-        --context_tower ~/HGNN/context_tower \
-        --output_dir   ~/HGNN/checkpoints \
-        --epochs 20 \
-        --batch_size 256 \
-        --embed_dim 256
+    --data_root ~/HGNN/shared/data_prep \
+    --output_dir ~/HGNN/checkpoints \
+    --epochs 20 \
+    --batch_size 64 \
+    --embed_dim 256
 """
 
 import os
@@ -60,6 +58,9 @@ from dataset import build_datasets, lcr_collate_fn  # noqa: E402
 # ---------------------------------------------------------------------------
 
 def infonce_loss(context_emb: torch.Tensor, paper_emb: torch.Tensor, temperature: float = 0.07) -> torch.Tensor:
+    # Takes a batch of B context embedding and B cited paper embeddings -> Compute [B,B] similarity matrix
+    # -> run cross-entropy in both directions (context -> paper) & (paper -> context) => averages both    
+    # Cross-entropy : measure the discrepancy (difference) between the predicted probability distribution of words and the actual distribution observed in the training data
     """
     Symmetric InfoNCE loss over in-batch negatives.
 
@@ -238,9 +239,15 @@ def train_one_epoch(
         scaler.step(optimizer)
         scaler.update()
 
-        total_loss += loss.item()
+        loss_val = loss.item()
+        if math.isnan(loss_val) or math.isinf(loss_val):
+            print(f"\n[WARN] NaN/Inf loss at batch {n_batches}, skipping.")
+            n_batches += 1
+            continue
+
+        total_loss += loss_val
         n_batches  += 1
-        pbar.set_postfix({"loss": f"{loss.item():.4f}"})
+        pbar.set_postfix({"loss": f"{loss_val:.4f}"})
 
     return total_loss / n_batches
 
@@ -268,7 +275,7 @@ def parse_args():
     parser.add_argument("--epochs",        type=int,   default=20)
     parser.add_argument("--batch_size",    type=int,   default=256)
     parser.add_argument("--max_length",    type=int,   default=256)
-    parser.add_argument("--lr_scibert",    type=float, default=1e-5)
+    parser.add_argument("--lr_scibert",    type=float, default=2e-6)
     parser.add_argument("--lr_head",       type=float, default=1e-3)
     parser.add_argument("--lr_paper",      type=float, default=1e-3)
     parser.add_argument("--patience",      type=int,   default=5,

@@ -1,0 +1,148 @@
+run 1 basic setup output:
+PaperTower  params: 3,287,555
+ContextTower params: 110,115,840
+
+Starting training for 20 epochs ...
+
+Epoch   1 | train_loss=2.1448  Precomputing corpus paper embeddings ...                                                                             
+ | R@1=0.1087 R@5=0.1728 R@10=0.2248 MRR=0.1499 nDCG@10=0.2777 (n=1,499)                                                                            
+  ✓ New best MRR=0.1499 — checkpoint saved
+Epoch   2 | train_loss=1.4543  Precomputing corpus paper embeddings ...                                                                             
+ | R@1=0.1381 R@5=0.2522 R@10=0.3369 MRR=0.2028 nDCG@10=0.3340 (n=1,499)                                                                            
+  ✓ New best MRR=0.2028 — checkpoint saved
+Epoch   3 | train_loss=1.1917  Precomputing corpus paper embeddings ...                                                                             
+ | R@1=0.1995 R@5=0.3402 R@10=0.4263 MRR=0.2721 nDCG@10=0.3962 (n=1,499)                                                                            
+  ✓ New best MRR=0.2721 — checkpoint saved
+Epoch   4 | train_loss=1.0233  Precomputing corpus paper embeddings ...                                                                             
+ | R@1=0.2201 R@5=0.3983 R@10=0.4883 MRR=0.3086 nDCG@10=0.4299 (n=1,499)                                                                            
+  ✓ New best MRR=0.3086 — checkpoint saved
+Epoch   5 | train_loss=0.8951  Precomputing corpus paper embeddings ...                                                                             
+ | R@1=0.2535 R@5=0.4296 R@10=0.5250 MRR=0.3424 nDCG@10=0.4598 (n=1,499)                                                                            
+  ✓ New best MRR=0.3424 — checkpoint saved
+Epoch   6 | train_loss=0.7985  Precomputing corpus paper embeddings ...                                                                             
+ | R@1=0.2815 R@5=0.4797 R@10=0.5644 MRR=0.3774 nDCG@10=0.4904 (n=1,499)                                                                            
+  ✓ New best MRR=0.3774 — checkpoint saved
+Epoch   7 | train_loss=0.7242  Precomputing corpus paper embeddings ...                                                                             
+ | R@1=0.3162 R@5=0.5050 R@10=0.5744 MRR=0.4075 nDCG@10=0.5135 (n=1,499)                                                                            
+  ✓ New best MRR=0.4075 — checkpoint saved
+Epoch   8 | train_loss=0.6583  Precomputing corpus paper embeddings ...                                                                             
+ | R@1=0.3389 R@5=0.5150 R@10=0.5877 MRR=0.4267 nDCG@10=0.5291 (n=1,499)                                                                            
+  ✓ New best MRR=0.4267 — checkpoint saved
+Epoch   9 | train_loss=0.5961  Precomputing corpus paper embeddings ...                                                                             
+ | R@1=0.3496 R@5=0.5344 R@10=0.6004 MRR=0.4403 nDCG@10=0.5413 (n=1,499)                                                                            
+  ✓ New best MRR=0.4403 — checkpoint saved
+Epoch  10 | train_loss=0.5519  Precomputing corpus paper embeddings ...                                                                             
+ | R@1=0.3736 R@5=0.5470 R@10=0.6237 MRR=0.4608 nDCG@10=0.5587 (n=1,499)                                                                            
+  ✓ New best MRR=0.4608 — checkpoint saved
+Epoch  11 | train_loss=0.5153  Precomputing corpus paper embeddings ...                                                                             
+ | R@1=0.3829 R@5=0.5744 R@10=0.6478 MRR=0.4744 nDCG@10=0.5705 (n=1,499)                                                                            
+  ✓ New best MRR=0.4744 — checkpoint saved
+Epoch  12 | train_loss=nan  Precomputing corpus paper embeddings ...                                                                                
+ | R@1=0.3903 R@5=0.5784 R@10=0.6458 MRR=0.4823 nDCG@10=0.5769 (n=1,499)                                                                            
+  ✓ New best MRR=0.4823 — checkpoint saved
+Epoch  13 | train_loss=nan  Precomputing corpus paper embeddings ...                                                                                
+ | R@1=0.3649 R@5=0.5744 R@10=0.6398 MRR=0.4610 nDCG@10=0.5597 (n=1,499)                                                                            
+  (no improvement, patience 1/5)
+Epoch  14 | train_loss=nan  Precomputing corpus paper embeddings ...                                                                                
+ | R@1=0.3803 R@5=0.5764 R@10=0.6411 MRR=0.4713 nDCG@10=0.5676 (n=1,499)                                                                            
+  (no improvement, patience 2/5)
+Epoch  15 | train_loss=nan  Precomputing corpus paper embeddings ...                                                                                
+ | R@1=0.3803 R@5=0.5764 R@10=0.6411 MRR=0.4713 nDCG@10=0.5676 (n=1,499)                                                                            
+  (no improvement, patience 3/5)
+Epoch  16 | train_loss=nan  Precomputing corpus paper embeddings ...                                                                                
+ | R@1=0.3803 R@5=0.5764 R@10=0.6411 MRR=0.4713 nDCG@10=0.5676 (n=1,499)                                                                            
+  (no improvement, patience 4/5)
+Epoch  17 | train_loss=nan  Precomputing corpus paper embeddings ...                                                                                
+ | R@1=1.0000 R@5=1.0000 R@10=1.0000 MRR=1.0000 nDCG@10=1.0000 (n=1,499)                                                                            
+  ✓ New best MRR=1.0000 — checkpoint saved
+Epoch  18 | train_loss=nan  Precomputing corpus paper embeddings ...                                                                                
+ | R@1=1.0000 R@5=1.0000 R@10=1.0000 MRR=1.0000 nDCG@10=1.0000 (n=1,499)                                                                            
+  (no improvement, patience 1/5)
+Epoch  19 | train_loss=nan  Precomputing corpus paper embeddings ...                                                                                
+ | R@1=1.0000 R@5=1.0000 R@10=1.0000 MRR=1.0000 nDCG@10=1.0000 (n=1,499)                                                                            
+  (no improvement, patience 2/5)
+Epoch  20 | train_loss=nan  Precomputing corpus paper embeddings ...                                                                                
+ | R@1=1.0000 R@5=1.0000 R@10=1.0000 MRR=1.0000 nDCG@10=1.0000 (n=1,499)                                                                            
+  (no improvement, patience 3/5)
+
+Training history saved to /home/jovyan/HGNN/checkpoints/20260622_084305/history.json
+Best val MRR=1.0000 at epoch 17
+
+=======================================================
+  TEST SET RESULTS
+=======================================================
+  Queries evaluated : 1,518
+  Skipped (external): 6,770
+  Corpus size       : 1,770
+-------------------------------------------------------
+  Recall@1          : 0.1423  (216 / 1,518)
+  Recall@5          : 0.2095  (318 / 1,518)
+  Recall@10         : 0.2602  (395 / 1,518)
+  Recall@20         : 0.3300  (501 / 1,518)
+  MRR               : 0.1848
+  nDCG@10           : 0.3075
+=======================================================
+
+  Rank distribution (n=1,518):
+  Median rank : 65
+  Mean rank   : 176.4
+  Rank=1      : 216 (14.2%)
+  Rank≤5      : 318 (20.9%)
+  Rank≤10     : 395 (26.0%)
+  Rank>100    : 629 (41.4%)
+
+Results saved to /home/jovyan/HGNN/checkpoints/20260622_083405/test_results.json
+
+
+
+
+problem:
+train_loss=nan starting epoch 12 — this is the root cause. The loss exploded to NaN, which corrupted the model weights. Everything after epoch 12 is meaningless, including the fake MRR=1.0000 at epoch 17 (that's the model outputting identical embeddings for everything — a collapsed state).
+
+lr_scibert dropped from 1e-5 → 2e-6 (fix the gradient overflow in SciBERT)
+
+
+PaperTower  params: 3,287,555
+ContextTower params: 110,115,840
+
+Starting training for 12 epochs ...
+
+Epoch   1 | train_loss=2.2291  Precomputing corpus paper embeddings ...                                                                             
+ | R@1=0.0414 R@5=0.0894 R@10=0.1474 MRR=0.0770 nDCG@10=0.2110 (n=1,499)                                                                            
+  ✓ New best MRR=0.0770 — checkpoint saved
+Epoch   2 | train_loss=1.6345  Precomputing corpus paper embeddings ...                                                                             
+ | R@1=0.0821 R@5=0.1781 R@10=0.2375 MRR=0.1371 nDCG@10=0.2726 (n=1,499)                                                                            
+  ✓ New best MRR=0.1371 — checkpoint saved
+Epoch   3 | train_loss=1.4470  Precomputing corpus paper embeddings ...                                                                             
+ | R@1=0.1114 R@5=0.2035 R@10=0.2682 MRR=0.1674 nDCG@10=0.3010 (n=1,499)                                                                            
+  ✓ New best MRR=0.1674 — checkpoint saved
+Epoch   4 | train_loss=1.3252  Precomputing corpus paper embeddings ...                                                                             
+ | R@1=0.1241 R@5=0.2255 R@10=0.3155 MRR=0.1871 nDCG@10=0.3201 (n=1,499)                                                                            
+  ✓ New best MRR=0.1871 — checkpoint saved
+Epoch   5 | train_loss=1.2308  Precomputing corpus paper embeddings ...                                                                             
+ | R@1=0.1494 R@5=0.2915 R@10=0.3689 MRR=0.2224 nDCG@10=0.3543 (n=1,499)                                                                            
+  ✓ New best MRR=0.2224 — checkpoint saved
+Epoch   6 | train_loss=1.1535  Precomputing corpus paper embeddings ...                                                                             
+ | R@1=0.1855 R@5=0.3329 R@10=0.4310 MRR=0.2664 nDCG@10=0.3940 (n=1,499)                                                                            
+  ✓ New best MRR=0.2664 — checkpoint saved
+Epoch   7 | train_loss=1.0976  Precomputing corpus paper embeddings ...                                                                             
+ | R@1=0.1868 R@5=0.3329 R@10=0.4290 MRR=0.2689 nDCG@10=0.3960 (n=1,499)                                                                            
+  ✓ New best MRR=0.2689 — checkpoint saved
+Epoch   8 | train_loss=1.0349  Precomputing corpus paper embeddings ...                                                                             
+ | R@1=0.2121 R@5=0.3816 R@10=0.4703 MRR=0.2974 nDCG@10=0.4211 (n=1,499)                                                                            
+  ✓ New best MRR=0.2974 — checkpoint saved
+Epoch   9 | train_loss=0.9799  Precomputing corpus paper embeddings ...                                                                             
+ | R@1=0.2101 R@5=0.3696 R@10=0.4636 MRR=0.2960 nDCG@10=0.4191 (n=1,499)                                                                            
+  (no improvement, patience 1/5)
+Epoch  10 | train_loss=0.9428  Precomputing corpus paper embeddings ...                                                                             
+ | R@1=0.2375 R@5=0.4143 R@10=0.5070 MRR=0.3275 nDCG@10=0.4468 (n=1,499)                                                                            
+  ✓ New best MRR=0.3275 — checkpoint saved
+Epoch  11 | train_loss=0.9026  Precomputing corpus paper embeddings ...                                                                             
+ | R@1=0.2455 R@5=0.4270 R@10=0.5203 MRR=0.3351 nDCG@10=0.4545 (n=1,499)                                                                            
+  ✓ New best MRR=0.3351 — checkpoint saved
+Epoch  12 | train_loss=0.8705  Precomputing corpus paper embeddings ...                                                                             
+ | R@1=0.2615 R@5=0.4350 R@10=0.5243 MRR=0.3506 nDCG@10=0.4670 (n=1,499)                                                                            
+  ✓ New best MRR=0.3506 — checkpoint saved
+
+Training history saved to /home/jovyan/HGNN/checkpoints/20260622_120325/history.json
+Best val MRR=0.3506 at epoch 12

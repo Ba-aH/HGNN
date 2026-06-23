@@ -54,17 +54,17 @@ class CitationRecord:
 # Dataset
 # ---------------------------------------------------------------------------
 
-class LCRDataset(Dataset):
+class LCRDataset(Dataset): #list of pairs (context_text, cited_paper_id) 
     """
     Parameters
     ----------
-    records : list[CitationRecord]
+    records : list[CitationRecord]  
     tokenizer : transformers tokenizer
     max_length : int
         Maximum token length for SciBERT (hard cap 512).
     """
 
-    def __init__(
+    def __init__( # store record "list of citation record" + tokenizer
         self,
         records: List[CitationRecord],
         tokenizer,
@@ -77,8 +77,8 @@ class LCRDataset(Dataset):
     def __len__(self):
         return len(self.records)
 
-    def __getitem__(self, idx):
-        rec = self.records[idx]
+    def __getitem__(self, idx): # Takes one CitationRecord, runs the tokenizer on context_text and returns a dict with input_ids, attention_mask, and cited_paper_id
+        rec = self.records[idx] # called once per sample per epoch.
 
         enc = self.tokenizer(
             rec.context_text,
@@ -89,9 +89,9 @@ class LCRDataset(Dataset):
         )
 
         return {
-            "input_ids":      enc["input_ids"],
-            "attention_mask": enc["attention_mask"],
-            "cited_paper_id": rec.cited_paper_id,
+            "input_ids":      enc["input_ids"], # batch of token sequences
+            "attention_mask": enc["attention_mask"], # batch of masks
+            "cited_paper_id": rec.cited_paper_id, # batch of labels
         }
 
 
@@ -99,7 +99,7 @@ class LCRDataset(Dataset):
 # Collate
 # ---------------------------------------------------------------------------
 
-def lcr_collate_fn(batch):
+def lcr_collate_fn(batch): # It receives a batch of variable-length sequences (context) from __getitem__, finds the longest sequence in the batch, right-pads all shorter sequences with zeros
     """
     Pads input_ids and attention_mask to the longest sequence in the batch.
     Returns:
@@ -129,7 +129,7 @@ def lcr_collate_fn(batch):
 
 
 # ---------------------------------------------------------------------------
-# Builder
+# Builder 
 # ---------------------------------------------------------------------------
 
 def build_datasets(
@@ -155,7 +155,7 @@ def build_datasets(
         "n_papers":  int,        # total number of paper nodes (corpus + external)
     }
     """
-    # --- Load node index ---
+    # --- Load node index ---> mapping for all papers from node_index.json by  {uri → int_id} 
     print(f"Loading node index from {node_index_path} ...")
     with open(node_index_path, encoding="utf-8") as f:
         node_index = json.load(f)
@@ -163,7 +163,7 @@ def build_datasets(
     n_papers = len(paper_uri_to_id)
     print(f"  {n_papers:,} paper nodes in KG")
 
-    # --- Load and filter records ---
+    # --- Load and filter records ---> iterates every record and build a flat list of CitationRecord objects from all_contexts.json
     print(f"Loading contexts from {all_contexts_path} ...")
     with open(all_contexts_path, encoding="utf-8") as f:
         raw = json.load(f)
@@ -175,7 +175,7 @@ def build_datasets(
         cited_uri    = item.get("cited_uri", "")
         context_text = item.get("context", "").strip()
         citing_uri   = item.get("citing_uri", "")
-
+        # skip records with missing context or missing cited uri
         if not context_text:
             skipped += 1
             continue
@@ -192,21 +192,27 @@ def build_datasets(
 
     print(f"  {len(records):,} records kept, {skipped:,} skipped")
 
-    # --- Deterministic shuffle + split ---
+    # --- Deterministic shuffle + split ---> shuffle the the list of CitationRecord "seed"=42 then split to 80/10/10 train/val/test
+    # ---> split by citing URI's 80/10/10
+    citing_uris = list({r.citing_uri for r in records})
     rng = random.Random(seed)
-    rng.shuffle(records)
-
-    n       = len(records)
-    n_train = int(n * train_ratio)
-    n_val   = int(n * val_ratio)
-
-    train_records = records[:n_train]
-    val_records   = records[n_train : n_train + n_val]
-    test_records  = records[n_train + n_val :]
+    rng.shuffle(citing_uris)
+    
+    n_uris       = len(citing_uris)
+    n_train_uris = int(n_uris * train_ratio)
+    n_val_uris   = int(n_uris * val_ratio)
+    
+    train_uris = set(citing_uris[:n_train_uris])
+    val_uris   = set(citing_uris[n_train_uris : n_train_uris + n_val_uris])
+    test_uris  = set(citing_uris[n_train_uris + n_val_uris :])
+    
+    train_records = [r for r in records if r.citing_uri in train_uris]
+    val_records   = [r for r in records if r.citing_uri in val_uris]
+    test_records  = [r for r in records if r.citing_uri in test_uris]
 
     print(f"  Split → train {len(train_records):,} / val {len(val_records):,} / test {len(test_records):,}")
 
-    # --- Tokenizer ---
+    # --- Tokenizer ---> load tokenizer and wrap each split train/val/test inside LCRDataset (a custom PyTorch Dataset class)
     print(f"Loading tokenizer ({tokenizer_name}) ...")
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
 
