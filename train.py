@@ -60,7 +60,8 @@ from dataset import build_datasets, lcr_collate_fn  # noqa: E402
 def infonce_loss(context_emb: torch.Tensor, paper_emb: torch.Tensor, temperature: float = 0.07) -> torch.Tensor:
     # Takes a batch of B context embedding and B cited paper embeddings -> Compute [B,B] similarity matrix
     # -> run cross-entropy in both directions (context -> paper) & (paper -> context) => averages both    
-    # Cross-entropy : measure the discrepancy (difference) between the predicted probability distribution of words and the actual distribution observed in the training data
+    # InfoNCE : measure the discrepancy (difference) between the predicted probability distribution of words and the actual distribution observed in the training data
+    # the original SeHGNN use Cross-entropy loss (because their objective is classification)
     """
     Symmetric InfoNCE loss over in-batch negatives.
 
