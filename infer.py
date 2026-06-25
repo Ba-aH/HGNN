@@ -9,11 +9,11 @@ Usage:
   --query "In the context of Dung’s abstract argumentation"
 
   python infer.py \
-  --checkpoint ~/HGNN/checkpoints/20260622_120325/best_model.pt \
+  --checkpoint ~/HGNN/checkpoints/20260623_150134/best_model.pt \
   --ttl_path ~/HGNN/shared/data_prep/merged-kg.ttl \
   --query "Discourse relations often carry ambiguous functions, where a single relation can simultaneously serve as both an elaboration and an argumentative justification. Prior annotation efforts have shown low inter-annotator agreement for these cases, particularly when examples and specifications are used to both illustrate a point and support a claim. Understanding this dual functionality is critical for improving discourse parsing and argument mining systems"
 
-  python infer.py   --checkpoint ~/HGNN/checkpoints/20260622_120325/best_model.pt   --ttl_path ~/HGNN/shared/data_prep/merged-kg.ttl   --query "we took a closer look at two types of relations for which inter-framework agreement is particularly poor, and investigate the factors affecting interpretation of these relations in more detail. The relations under investigation are PDTB’s INSTANTIATION and SPECIFICATION relations (32% and 14% agreement, respectively). These relations do not have many prototypical connectives and are therefore hard to identify"
+  python infer.py   --checkpoint ~/HGNN/checkpoints/20260623_150134/best_model.pt   --ttl_path ~/HGNN/shared/data_prep/merged-kg.ttl   --query "n and formal comparisons of semantics. This paper focuses on the evaluation of arguments in weighted bipolar argumentation graphs. It extends our previous works on axiomatic foundations of semantics for unipolar graphs (support graphs [cite] and attack graphs [cite]). It defines principles that a semantics would satisfy in a bipolar setting. Such principles are very useful for judging and understanding the underpinnings of semantics, and also for comparing semantics of the same family, and those of different families. Some of the proposed principles are simple combinations of those proposed in [25, 26] Others are new and show how support and attack might be aggregated. The second contribution of the paper consists of analyzing existing semantics against the principles. The main conclusion is that extension semantics do not harness the potential of support relation. Indeed, when the attack relation is empty, the existing semantics declare all (supported, non-supported) arguments of a graph as equally accepted. Weighted semantics take into account supporters in this particular case,however they violate some key principles. The third contribution of the paper is the definition of a novel weigh"
 """
 
 import os

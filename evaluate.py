@@ -8,7 +8,7 @@ Reports: Recall@1, Recall@5, Recall@10, Recall@20, MRR, nDCG@10
 
 Usage:
     python evaluate.py \
-        --checkpoint ~/HGNN/checkpoints/20260622_120325/best_model.pt \
+        --checkpoint ~/HGNN/checkpoints/20260623_150134/best_model.pt \
         --data_root  ~/HGNN/shared/data_prep
 """
 
