@@ -54,7 +54,7 @@ class CitationRecord:
 # Dataset
 # ---------------------------------------------------------------------------
 
-class LCRDataset(Dataset): #list of pairs (context_text, cited_paper_id) 
+class LCRDataset(Dataset): # list of pairs (context_text, cited_paper_id) 
     """
     Parameters
     ----------
@@ -81,16 +81,16 @@ class LCRDataset(Dataset): #list of pairs (context_text, cited_paper_id)
         rec = self.records[idx] # called once per sample per epoch.
 
         enc = self.tokenizer(
-            rec.context_text,
-            max_length=self.max_length,
-            truncation=True,
+            rec.context_text, # cotext text to be tokenized
+            max_length=self.max_length, # max number of tokens to keep
+            truncation=True, # truncate extra tokens if context_text is longer than max_length
             padding=False,          # collate_fn handles padding
             return_tensors=None,    # return plain lists; collate pads to batch max
         )
 
         return {
             "input_ids":      enc["input_ids"], # batch of token sequences
-            "attention_mask": enc["attention_mask"], # batch of masks
+            "attention_mask": enc["attention_mask"], # batch of masks (indicates which token to focus on and which to ignore(padded tokens))
             "cited_paper_id": rec.cited_paper_id, # batch of labels
         }
 
@@ -99,7 +99,11 @@ class LCRDataset(Dataset): #list of pairs (context_text, cited_paper_id)
 # Collate
 # ---------------------------------------------------------------------------
 
-def lcr_collate_fn(batch): # It receives a batch of variable-length sequences (context) from __getitem__, finds the longest sequence in the batch, right-pads all shorter sequences with zeros
+def lcr_collate_fn(batch): 
+    #prepare the data for the pytorch's DataLoader to handle variable-length sequences by padding them to the same length within a batch.
+    # It receives a batch of variable-length sequences (context) from __getitem__, 
+    # finds the longest sequence in the batch
+    #  add zeros to sequences shorter than the longest sequence (to the attention mask as well as the input_ids)
     """
     Pads input_ids and attention_mask to the longest sequence in the batch.
     Returns:
