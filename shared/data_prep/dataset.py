@@ -68,7 +68,7 @@ class LCRDataset(Dataset): # list of pairs (context_text, cited_paper_id)
         self,
         records: List[CitationRecord],
         tokenizer,
-        max_length: int = 256,
+        max_length: int = 256, # SciBERT default is 521 but since my context is 
     ):
         self.records    = records
         self.tokenizer  = tokenizer
