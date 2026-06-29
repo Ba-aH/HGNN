@@ -116,7 +116,7 @@ for ext_idx, uri in enumerate(external_uris):
         all_vecs.append(encode_texts(batch))
 
     paper_vecs  = torch.cat(all_vecs, dim=0)  # [n_ctx, 768]
-    feat[ext_idx]        = paper_vecs.mean(dim=0)
+    feat[ext_idx]        = paper_vecs.mean(dim=0) # mean pooling here the N passages of paper[i]
     has_feature[ext_idx] = True
 
     if (ext_idx + 1) % 100 == 0:

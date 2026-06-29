@@ -22,21 +22,21 @@ from pathlib import Path
 
 import torch
 
-
-def to_torch_sparse_tensor(sp: torch.Tensor):
-    """Convert native PyTorch sparse COO to torch_sparse.SparseTensor if needed."""
-    try:
-        import torch_sparse
-        sp = sp.coalesce().cpu()
-        row, col = sp.indices()
-        value = sp.values()
-        return torch_sparse.SparseTensor(
-            row=row, col=col, value=value, 
-            sparse_sizes=sp.shape
-        )
-    except ImportError:
-        print("torch_sparse not installed — keeping native sparse tensors")
-        return sp
+# if needed for comptability with torch_sparse.SparseTensor
+# def to_torch_sparse_tensor(sp: torch.Tensor):
+#     """Convert native PyTorch sparse COO to torch_sparse.SparseTensor if needed."""
+#     try:
+#         import torch_sparse
+#         sp = sp.coalesce().cpu()
+#         row, col = sp.indices()
+#         value = sp.values()
+#         return torch_sparse.SparseTensor(
+#             row=row, col=col, value=value, 
+#             sparse_sizes=sp.shape
+#         )
+#     except ImportError:
+#         print("torch_sparse not installed — keeping native sparse tensors")
+#         return sp
 
         
 OUT_DIR = Path(".")
