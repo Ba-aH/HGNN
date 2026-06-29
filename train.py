@@ -245,10 +245,13 @@ def train_one_epoch(
         )
 
         # Update the weights:
-            # context tower: - all SciBERT weights being updated
-            #                - the projection linear layer + LayerNorm that maps 768 -> 256 
-            # paper tower: - all SciBERT weights being updated
-            #              - the projection linear layer + LayerNorm that maps 768 -> 256
+            # context tower: - all SciBERT weights (fine-tuned at lr=2e-6)
+            #                - proj Linear(768→256) + LayerNorm (at lr=1e-4)
+            # paper tower:   - LinearPerMetapath layers (per-metapath MLP projection)
+            #                - Transformer (cross-metapath semantic fusion)
+            #                - fc_after_concat Linear(M*512→512)
+            #                - proj_head Linear(512→256)
+            #                  all at lr=1e-3
         scaler.step(optimizer)
         scaler.update()
 
@@ -268,8 +271,8 @@ def parse_args():
     parser.add_argument("--data_root",     default="~/HGNN/shared/data_prep")
     parser.add_argument("--output_dir",    default="~/HGNN/checkpoints")
 
-    parser.add_argument("--embed_dim",     type=int,   default=768)
-    parser.add_argument("--hidden",        type=int,   default=768) # The internal vector size that each metapath feature gets projected into before the Transformer fusion and final output
+    parser.add_argument("--embed_dim",     type=int,   default=256) #reduced embedding to 256 dimention
+    parser.add_argument("--hidden",        type=int,   default=512) # The internal vector size that each metapath feature gets projectedinto before the Transformer fusion and final output (reduced to 512)
     parser.add_argument("--n_fp_layers",   type=int,   default=2)
     parser.add_argument("--dropout",       type=float, default=0.3)
     parser.add_argument("--input_drop",    type=float, default=0.1)
