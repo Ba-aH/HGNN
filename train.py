@@ -330,7 +330,7 @@ def main():
 
     # --- Features ---
     print("Loading metapath feature tensors ...")
-    feat_keys = ["P", "PP"]
+    feat_keys = ["P", "PP", "PCCon"]
     all_paper_feats = {}
     for key in feat_keys:
         path = os.path.join(data_root, f"feat_{key}.pt")

@@ -285,7 +285,7 @@ class PaperTower(nn.Module):
 if __name__ == "__main__":
     import torch
 
-    feat_keys = ["P", "PP", "PCP"]
+    feat_keys = ["P", "PP", "PCCon"]
     B = 4          # batch of 4 papers
     nfeat = 768
     embed_dim = 256
