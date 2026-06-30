@@ -232,37 +232,37 @@ def build_datasets(
 # ---------------------------------------------------------------------------
 # Smoke test
 # ---------------------------------------------------------------------------
-if __name__ == "__main__":
-    import os
-    from torch.utils.data import DataLoader
+# if __name__ == "__main__":
+#     import os
+#     from torch.utils.data import DataLoader
 
-    BASE = os.path.expanduser("~/HGNN/shared/data_prep")
+#     BASE = os.path.expanduser("~/HGNN/shared/data_prep")
 
-    result = build_datasets(
-        all_contexts_path = os.path.join(BASE, "all_contexts.json"),
-        node_index_path   = os.path.join(BASE, "node_index.json"),
-        max_length        = 256,
-    )
+#     result = build_datasets(
+#         all_contexts_path = os.path.join(BASE, "all_contexts.json"),
+#         node_index_path   = os.path.join(BASE, "node_index.json"),
+#         max_length        = 256,
+#     )
 
-    for split in ("train", "val", "test"):
-        ds = result[split]
-        print(f"\n{split}: {len(ds):,} samples")
-        sample = ds[0]
-        print(f"  input_ids length : {len(sample['input_ids'])}")
-        print(f"  cited_paper_id   : {sample['cited_paper_id']}")
+#     for split in ("train", "val", "test"):
+#         ds = result[split]
+#         print(f"\n{split}: {len(ds):,} samples")
+#         sample = ds[0]
+#         print(f"  input_ids length : {len(sample['input_ids'])}")
+#         print(f"  cited_paper_id   : {sample['cited_paper_id']}")
 
-    # DataLoader with collate
-    loader = DataLoader(
-        result["train"],
-        batch_size=8,
-        shuffle=True,
-        collate_fn=lcr_collate_fn,
-    )
-    batch = next(iter(loader))
-    print(f"\nBatch shapes:")
-    print(f"  input_ids      : {batch['input_ids'].shape}")
-    print(f"  attention_mask : {batch['attention_mask'].shape}")
-    print(f"  cited_paper_id : {batch['cited_paper_id'].shape}")
-    print(f"  cited_paper_id values: {batch['cited_paper_id'].tolist()}")
-    print(f"\nTotal paper nodes: {result['n_papers']:,}")
-    print("\nStep C complete.")
+#     # DataLoader with collate
+#     loader = DataLoader(
+#         result["train"],
+#         batch_size=8,
+#         shuffle=True,
+#         collate_fn=lcr_collate_fn,
+#     )
+#     batch = next(iter(loader))
+#     print(f"\nBatch shapes:")
+#     print(f"  input_ids      : {batch['input_ids'].shape}")
+#     print(f"  attention_mask : {batch['attention_mask'].shape}")
+#     print(f"  cited_paper_id : {batch['cited_paper_id'].shape}")
+#     print(f"  cited_paper_id values: {batch['cited_paper_id'].tolist()}")
+#     print(f"\nTotal paper nodes: {result['n_papers']:,}")
+#     print("\nStep C complete.")

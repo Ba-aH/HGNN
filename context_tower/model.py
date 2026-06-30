@@ -45,13 +45,12 @@ class ContextTower(nn.Module):
         Dropout applied after CLS pooling, before the projection layer.
     """
 
-    SCIBERT_HIDDEN = 768   # fixed for allenai/scibert_scivocab_uncased
 
     def __init__(
         self,
-        embed_dim: int = 256,
-        scibert_model_name: str = "allenai/scibert_scivocab_uncased",
-        dropout: float = 0.1,
+        embed_dim: int,
+        scibert_model_name: str,
+        dropout: float,
     ):
         super().__init__()
 
@@ -62,7 +61,8 @@ class ContextTower(nn.Module):
 
         # --- Projection head ---
         self.dropout = nn.Dropout(dropout)
-        self.proj    = nn.Linear(self.SCIBERT_HIDDEN, embed_dim)
+        self.proj    = nn.Linear(768, embed_dim) # 768 is the hidden size of SciBERT,it's a property of the model, not a hyperparameter.
+                                                 # HIDDEN: it's the dimension of the vector that represents each token after passing through the transformer layers.
         self.norm    = nn.LayerNorm(embed_dim)
 
         self._init_projection()
@@ -107,7 +107,7 @@ class ContextTower(nn.Module):
         return F.normalize(x, p=2, dim=-1)
 
     # ------------------------------------------------------------------
-    def get_param_groups(self, lr_scibert: float = 1e-5, lr_head: float = 1e-4) -> list:
+    def get_param_groups(self, lr_scibert: float, lr_head: float) -> list:
         """
         Returns two parameter groups with different learning rates,
         ready to pass directly to an optimiser.
@@ -127,40 +127,40 @@ class ContextTower(nn.Module):
 # ---------------------------------------------------------------------------
 # Smoke test
 # ---------------------------------------------------------------------------
-if __name__ == "__main__":
-    from transformers import AutoTokenizer
+# if __name__ == "__main__":
+#     from transformers import AutoTokenizer
 
-    embed_dim = 256
-    model = ContextTower(embed_dim=embed_dim)
-    print(model)
+#     embed_dim = 256
+#     model = ContextTower(embed_dim=embed_dim)
+#     print(model)
 
-    scibert_params = sum(p.numel() for p in model.scibert.parameters())
-    head_params    = sum(p.numel() for p in model.proj.parameters()) \
-                   + sum(p.numel() for p in model.norm.parameters())
-    print(f"\nSciBERT params : {scibert_params:,}")
-    print(f"Head params    : {head_params:,}")
-    print(f"Total params   : {scibert_params + head_params:,}")
+#     scibert_params = sum(p.numel() for p in model.scibert.parameters())
+#     head_params    = sum(p.numel() for p in model.proj.parameters()) \
+#                    + sum(p.numel() for p in model.norm.parameters())
+#     print(f"\nSciBERT params : {scibert_params:,}")
+#     print(f"Head params    : {head_params:,}")
+#     print(f"Total params   : {scibert_params + head_params:,}")
 
-    # Tokenise two fake citing passages
-    tokenizer = AutoTokenizer.from_pretrained("allenai/scibert_scivocab_uncased")
-    passages = [
-        "Graph neural networks have been widely adopted for node classification [CITATION].",
-        "As shown by [CITATION], attention mechanisms improve heterogeneous graph learning.",
-    ]
-    enc = tokenizer(passages, padding=True, truncation=True,
-                    max_length=128, return_tensors="pt")
+#     # Tokenise two fake citing passages
+#     tokenizer = AutoTokenizer.from_pretrained("allenai/scibert_scivocab_uncased")
+#     passages = [
+#         "Graph neural networks have been widely adopted for node classification [CITATION].",
+#         "As shown by [CITATION], attention mechanisms improve heterogeneous graph learning.",
+#     ]
+#     enc = tokenizer(passages, padding=True, truncation=True,
+#                     max_length=128, return_tensors="pt")
 
-    model.eval()
-    with torch.no_grad():
-        out = model(enc["input_ids"], enc["attention_mask"])
+#     model.eval()
+#     with torch.no_grad():
+#         out = model(enc["input_ids"], enc["attention_mask"])
 
-    print(f"\nInput:  {len(passages)} passages")
-    print(f"Output: {out.shape}  (expected [{len(passages)}, {embed_dim}])")
-    norms = out.norm(dim=-1)
-    print(f"Output norms: {norms.tolist()}  (expected all ≈ 1.0)")
+#     print(f"\nInput:  {len(passages)} passages")
+#     print(f"Output: {out.shape}  (expected [{len(passages)}, {embed_dim}])")
+#     norms = out.norm(dim=-1)
+#     print(f"Output norms: {norms.tolist()}  (expected all ≈ 1.0)")
 
-    # Check param groups
-    groups = model.get_param_groups()
-    print(f"\nParam groups: {len(groups)} groups")
-    print(f"  Group 0 (SciBERT) lr={groups[0]['lr']}")
-    print(f"  Group 1 (head)    lr={groups[1]['lr']}")
+#     # Check param groups
+#     groups = model.get_param_groups()
+#     print(f"\nParam groups: {len(groups)} groups")
+#     print(f"  Group 0 (SciBERT) lr={groups[0]['lr']}")
+#     print(f"  Group 1 (head)    lr={groups[1]['lr']}")

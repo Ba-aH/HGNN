@@ -171,17 +171,17 @@ class PaperTower(nn.Module):
 
     def __init__(
         self,
-        feat_keys: list,
-        nfeat: int = 768,
-        hidden: int = 512,
-        embed_dim: int = 256,
-        n_fp_layers: int = 2,
-        dropout: float = 0.5,
-        input_drop: float = 0.1,
-        att_drop: float = 0.0,
-        num_heads: int = 1,
-        act: str = "none",
-        residual: bool = False,
+        feat_keys: list, # feature keys (metapaths) in canonical order, e.g. ["P", "PP", "PCP"]
+        nfeat: int, # input feature dimension (768 for SciBERT)
+        hidden: int, # size of hidden dimension inside Transformer and projection layers
+        embed_dim: int, # final embedding dimension (shared with ContextTower)
+        n_fp_layers: int, # number of LinearPerMetapath MLP layers ( = number of feature projection layers)
+        dropout: float, # dropout on activations
+        input_drop: float, # dropout applied to input features before projection
+        att_drop: float, # attention dropout inside the Transformer
+        num_heads: int, # the number of attention heads in multi-head attention mechanisms.
+        act: str, # activation function inside Transformer attention ('none' | 'relu' | 'leaky_relu' | 'sigmoid').
+        residual: bool,
     ):
         super().__init__()
 
@@ -282,31 +282,39 @@ class PaperTower(nn.Module):
         # L2 normalise → unit sphere
         return F.normalize(x, p=2, dim=-1)
 
-if __name__ == "__main__":
-    import torch
 
-    feat_keys = ["P", "PP", "PCCon"]
-    B = 4          # batch of 4 papers
-    nfeat = 768
-    embed_dim = 256
 
-    model = PaperTower(
-        feat_keys=feat_keys,
-        nfeat=nfeat,
-        hidden=512,
-        embed_dim=embed_dim,
-        n_fp_layers=2,
-    )
-    print(model)
-    print(f"\nTotal params: {sum(p.numel() for p in model.parameters()):,}")
 
-    # Fake metapath features (normally loaded from .pt files)
-    feat_dict = {k: torch.randn(B, nfeat) for k in feat_keys}
 
-    out = model(feat_dict)
-    print(f"\nInput:  {B} papers, {len(feat_keys)} metapaths, each {nfeat}-dim")
-    print(f"Output: {out.shape}  (expected [{B}, {embed_dim}])")
 
-    # Check L2 normalisation
-    norms = out.norm(dim=-1)
-    print(f"Output norms: {norms.tolist()}  (expected all ≈ 1.0)")
+# ---------------------------------------------------------------------------
+# Smoke test
+# ---------------------------------------------------------------------------
+# if __name__ == "__main__":
+#     import torch
+
+#     feat_keys = ["P", "PP", "PCCon"]
+#     B = 4          # batch of 4 papers
+#     nfeat = 768
+#     embed_dim = 256
+
+#     model = PaperTower(
+#         feat_keys=feat_keys,
+#         nfeat=nfeat,
+#         hidden=512,
+#         embed_dim=embed_dim,
+#         n_fp_layers=2,
+#     )
+#     print(model)
+#     print(f"\nTotal params: {sum(p.numel() for p in model.parameters()):,}")
+
+#     # Fake metapath features (normally loaded from .pt files)
+#     feat_dict = {k: torch.randn(B, nfeat) for k in feat_keys}
+
+#     out = model(feat_dict)
+#     print(f"\nInput:  {B} papers, {len(feat_keys)} metapaths, each {nfeat}-dim")
+#     print(f"Output: {out.shape}  (expected [{B}, {embed_dim}])")
+
+#     # Check L2 normalisation
+#     norms = out.norm(dim=-1)
+#     print(f"Output norms: {norms.tolist()}  (expected all ≈ 1.0)")
