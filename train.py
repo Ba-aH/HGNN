@@ -221,9 +221,13 @@ def main():
         max_length        = cfg["max_length"],
         seed              = cfg["seed"],
     )
-    train_loader = DataLoader(datasets["train"], batch_size=cfg["batch_size"],
+
+    # Batch formulation using the PyTorch default randomSampler
+    train_loader = DataLoader(datasets["train"], batch_size=cfg["batch_size"], #
                               shuffle=True,  collate_fn=lcr_collate_fn,
                               num_workers=4, pin_memory=True)
+    
+    
     val_loader   = DataLoader(datasets["val"], batch_size=64,
                               shuffle=False, collate_fn=lcr_collate_fn,
                               num_workers=4, pin_memory=True)

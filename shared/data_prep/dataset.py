@@ -48,6 +48,7 @@ class CitationRecord:
     cited_paper_id: int   # global integer index into feat tensors
     cited_uri:      str   # kept for debugging / evaluation
     citing_uri:     str
+    citation_type:  str  # citation type (single or multiple) for the citation context
 
 
 # ---------------------------------------------------------------------------
@@ -179,8 +180,12 @@ def build_datasets(
         cited_uri    = item.get("cited_uri", "")
         context_text = item.get("context", "").strip()
         citing_uri   = item.get("citing_uri", "")
+        citation_type   = item.get("citation_type", "")
         # skip records with missing context or missing cited uri
         if not context_text:
+            skipped += 1
+            continue
+        if not citation_type:
             skipped += 1
             continue
         if cited_uri not in paper_uri_to_id:
@@ -192,6 +197,7 @@ def build_datasets(
             cited_paper_id = paper_uri_to_id[cited_uri],
             cited_uri      = cited_uri,
             citing_uri     = citing_uri,
+            citation_type  = citation_type,
         ))
 
     print(f"  {len(records):,} records kept, {skipped:,} skipped")
