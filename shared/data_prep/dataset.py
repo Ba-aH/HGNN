@@ -1,274 +1,411 @@
 """
-shared/data_prep/dataset.py
----------------------------
-PyTorch Dataset + train/val/test split for the LCR two-tower model.
+train.py
+--------
+Training script for the LCR two-tower retrieval model.
+Reads all hyperparameters from a JSON config file passed via --config.
 
-Each sample:
-    context_text  : str                 — citing passage (input to ContextTower)
-    cited_paper_id: int                 — global integer ID of the cited paper
-                                          (index into feat_P / feat_PP / feat_PCP tensors)
+Architecture:
+    ContextTower  — SciBERT (fine-tuned) → [B, embed_dim]
+    PaperTower    — SeHGNN metapath fusion → [N, embed_dim]
 
-Source file: shared/data_prep/all_contexts.json
-    [
-      {
-        "context":     <str>,
-        "cited_uri":   "https://citekg.org/resource/paper/<hash>",
-        "citing_uri":  "https://citekg.org/resource/paper/<hash>",
-        "citing_idx":  <int>
-      },
-      ...
-    ]
+Loss: InfoNCE over in-batch negatives
+    - Anchor   : context embedding
+    - Positive : cited paper embedding
+    - Negatives: all other papers in the batch
 
-Filters applied:
-    - cited_uri must exist in node_index["paper"]  (already guaranteed by merge,
-      but re-checked here for safety)
-    - context must be non-empty after stripping
+Evaluation metrics: Recall@K (K=1,5,10,20), MRR, nDCG@10
+    - Corpus index is a FROZEN SNAPSHOT built before each epoch's training step.
 
-Split: deterministic random split seeded at 42
-    train 80% / val 10% / test 10%
+Usage:
+    python train.py --config configs/exp01_PP_768.json
 """
 
+import os
+import sys
 import json
+import math
+import argparse
 import random
-from dataclasses import dataclass
-from typing import List, Optional
+import time
+from datetime import datetime
 
+import numpy as np
 import torch
-from torch.utils.data import Dataset
-from transformers import AutoTokenizer
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.data import DataLoader
+from tqdm import tqdm
+
+# ---------------------------------------------------------------------------
+# Path setup
+# ---------------------------------------------------------------------------
+ROOT = os.path.expanduser("~/HGNN")
+sys.path.insert(0, os.path.join(ROOT, "paper_tower"))
+sys.path.insert(0, os.path.join(ROOT, "context_tower"))
+sys.path.insert(0, os.path.join(ROOT, "shared", "data_prep"))
+
+from paper_tower.model   import PaperTower
+from context_tower.model import ContextTower
+from dataset import build_datasets, lcr_collate_fn
+from group_aware_sampler import GroupAwareBatchSampler
+
 
 
 # ---------------------------------------------------------------------------
-# Data record
+# Config — load JSON, no defaults, every key must be present
 # ---------------------------------------------------------------------------
-
-@dataclass
-class CitationRecord:
-    context_text:   str
-    cited_paper_id: int   # global integer index into feat tensors
-    cited_uri:      str   # kept for debugging / evaluation
-    citing_uri:     str
-    citation_type:  str  # citation type (single or multiple) for the citation context
+def load_config(path: str) -> dict:
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
 
 
 # ---------------------------------------------------------------------------
-# Dataset
+# InfoNCE contrastive loss
+# For each context in the batch, the cited paper is the positive and the
+# other (batch_size - 1) papers are the negatives.
 # ---------------------------------------------------------------------------
+def infonce_loss(ctx_emb, paper_emb, temperature):
+    # Compute similarity between every context and every paper in the batch → [B, B]
+    # Dividing by temperature sharpens the distribution: lower = more confident
+    logits = torch.matmul(ctx_emb, paper_emb.T) / temperature
 
-class LCRDataset(Dataset): # list of pairs (context_text, cited_paper_id) 
-    """
-    Parameters
-    ----------
-    records : list[CitationRecord]  
-    tokenizer : transformers tokenizer
-    max_length : int
-        Maximum token length for SciBERT (hard cap 512).
-    """
+    # Ground truth: diagonal entries are the correct (context, paper) pairs
+    # label i = i means context i should match paper i
+    labels = torch.arange(logits.size(0), device=logits.device)
 
-    def __init__( # store record "list of citation record" + tokenizer
-        self,
-        records: List[CitationRecord],
-        tokenizer,
-        max_length: int = 256, # SciBERT default is 521 but since my context is 
-    ):
-        self.records    = records
-        self.tokenizer  = tokenizer
-        self.max_length = max_length
+    # Symmetric loss: penalise both directions equally
+    loss_c2p = F.cross_entropy(logits,   labels)   # context → paper: find the right paper for each context
+    loss_p2c = F.cross_entropy(logits.T, labels)   # paper → context: find the right context for each paper
 
-    def __len__(self):
-        return len(self.records)
+    return (loss_c2p + loss_p2c) / 2.0
 
-    def __getitem__(self, idx): # Takes one CitationRecord, runs the tokenizer on context_text and returns a dict with input_ids, attention_mask, and cited_paper_id
-        rec = self.records[idx] # called once per sample per epoch.
 
-        enc = self.tokenizer(
-            rec.context_text, # cotext text to be tokenized
-            max_length=self.max_length, # max number of tokens to keep
-            truncation=True, # truncate extra tokens if context_text is longer than max_length
-            padding=False,          # collate_fn handles padding
-            return_tensors=None,    # return plain lists; collate pads to batch max
+# ---------------------------------------------------------------------------
+# Build frozen candidate index
+# Runs PaperTower over all 26K papers ONCE before training starts each epoch.
+# The resulting matrix is fixed for the entire evaluation of that epoch —
+# weights keep updating during training but the index does not.
+# ---------------------------------------------------------------------------
+@torch.no_grad()
+def build_candidate_index(paper_tower, all_paper_feats, candidate_ids, device):
+    # Save training state so we can restore it after — eval() disables dropout
+    # which is required for deterministic embeddings during evaluation
+    was_training = paper_tower.training
+    paper_tower.eval()
+
+    embs = []
+    ids  = candidate_ids.tolist()
+
+    # Encode all 26K candidate papers in chunks of 512 
+    # The 512 paper then moved to CPU  memory to free up GPU memory for the next chunk to avoid GPU memory overflow
+    # append the CPU embeddings to a python list and concatenate all chunks to form the final candidate embedding matrix
+    for start in tqdm(range(0, len(ids), 512), desc="  Building index", leave=False):
+        batch_ids   = ids[start : start + 512]
+        # Look up precomputed metapath features for this chunk from the fixed disk tensors
+        batch_feats = {k: v[batch_ids].to(device) for k, v in all_paper_feats.items()}
+        # Move embeddings back to CPU immediately to free GPU memory
+        embs.append(paper_tower(batch_feats).cpu())
+
+    # Restore training state before returning
+    paper_tower.train(was_training)
+
+    # Concatenate all chunks → [N_candidates, embed_dim]
+    return torch.cat(embs, dim=0)
+
+
+# ---------------------------------------------------------------------------
+# Evaluation — ranks all 26K candidates for each val context
+# ---------------------------------------------------------------------------
+@torch.no_grad()
+def evaluate(context_tower, loader, candidate_embs, candidate_ids, device):
+    context_tower.eval()
+
+    # Move the frozen 26K candidate embeddings to GPU for fast dot product computation
+    cand_dev = candidate_embs.to(device)
+
+    # Map each global paper integer ID → its position in the candidate matrix
+    # e.g. {paper_id_5: 0, paper_id_12: 1, ...} so we can look up the ground truth rank instantly
+    global_to_pos = {gid: pos for pos, gid in enumerate(candidate_ids.tolist())}
+
+    recall_hits = {k: 0 for k in [1, 5, 10, 20]}
+    mrr_sum, ndcg_sum, n_queries, n_skipped = 0.0, 0.0, 0, 0
+
+    for batch in tqdm(loader, desc="  Evaluating", leave=False):
+
+        # Encode the batch of citation contexts → [B, embed_dim]
+        ctx_emb = context_tower(batch["input_ids"].to(device),
+                                batch["attention_mask"].to(device))
+
+        # Compute similarity between every context and every candidate paper → [B, N_candidates]
+        # Since both embeddings are L2-normalised, matmul = cosine similarity
+        sims = torch.matmul(ctx_emb, cand_dev.T)
+
+        for i, cited_id in enumerate(batch["cited_paper_id"].tolist()):
+
+            # Skip queries whose ground truth paper is not in the candidate pool
+            if cited_id not in global_to_pos:
+                n_skipped += 1
+                continue
+
+            pos = global_to_pos[cited_id]
+
+            # Rank = number of candidates with higher similarity than the ground truth + 1
+            # e.g. rank=1 means the correct paper was the top result
+            rank = int((sims[i] > sims[i][pos]).sum().item()) + 1
+
+            # Recall@K: did the correct paper appear in the top K results?
+            for k in [1, 5, 10, 20]:
+                if rank <= k:
+                    recall_hits[k] += 1
+
+            # MRR: mean reciprocal rank — rewards finding the correct paper early
+            mrr_sum += 1.0 / rank
+
+            # nDCG@10: discounted cumulative gain — logarithmic penalty for lower ranks
+            ndcg_sum += 1.0 / math.log2(rank + 1)
+
+            n_queries += 1
+
+    if n_queries == 0:
+        print("  [WARN] No valid queries.")
+        return {}
+
+    # Normalise all accumulated scores by total number of valid queries
+    metrics = {f"Recall@{k}": recall_hits[k] / n_queries for k in [1, 5, 10, 20]}
+    metrics.update({"MRR": mrr_sum / n_queries, "nDCG@10": ndcg_sum / n_queries,
+                    "n_queries": n_queries, "n_skipped": n_skipped})
+    return metrics
+
+
+# ---------------------------------------------------------------------------
+# One training epoch
+# For each batch: encode 64 contexts + their 64 cited papers → InfoNCE loss
+# → backprop → update both towers.
+# Returns (avg_loss, epoch_duration_seconds).
+# ---------------------------------------------------------------------------
+def train_one_epoch(context_tower, paper_tower, loader, optimizer,
+                    scaler, all_paper_feats, device, temperature, epoch):
+    # Set both towers to training mode (enables dropout)
+    context_tower.train()
+    paper_tower.train()
+    t0, total_loss, n_batches = time.time(), 0.0, 0
+
+    pbar = tqdm(loader, desc=f"Epoch {epoch}", leave=False)
+    for batch in pbar:
+
+        # Look up the precomputed metapath features for the cited papers in this batch
+        # batch["cited_paper_id"] is a list of integer IDs → used to index into feat tensors
+        batch_feats = {k: v[batch["cited_paper_id"]].to(device)
+                       for k, v in all_paper_feats.items()}
+
+        # Forward pass under mixed precision (float16) to save GPU memory and speed up compute
+        with torch.amp.autocast('cuda'):
+            loss = infonce_loss(
+                context_tower(batch["input_ids"].to(device),       # encode citation contexts → [B, embed_dim]
+                              batch["attention_mask"].to(device)),
+                paper_tower(batch_feats),                           # encode cited papers     → [B, embed_dim]
+                temperature,
+            )
+
+        loss_val = loss.item()
+
+        # Skip corrupted batches — NaN/Inf gradients would permanently damage weights
+        if math.isnan(loss_val) or math.isinf(loss_val):
+            print(f"\n[WARN] NaN/Inf at epoch {epoch} batch {n_batches} — skipping.")
+            optimizer.zero_grad()
+            n_batches += 1
+            continue
+
+        # Backward pass: compute gradients and update both towers
+        optimizer.zero_grad()
+        scaler.scale(loss).backward()
+        scaler.unscale_(optimizer)
+        # Clip gradients to prevent exploding gradients from destabilizing training
+        torch.nn.utils.clip_grad_norm_(
+            list(context_tower.parameters()) + list(paper_tower.parameters()),
+            max_norm=1.0,
         )
+        scaler.step(optimizer)
+        scaler.update()
 
-        return {
-            "input_ids":      enc["input_ids"], # batch of token sequences
-            "attention_mask": enc["attention_mask"], # batch of masks (indicates which token to focus on and which to ignore(padded tokens))
-            "cited_paper_id": rec.cited_paper_id, # batch of labels
-        }
+        total_loss += loss_val
+        n_batches  += 1
+        pbar.set_postfix({"loss": f"{loss_val:.4f}"})
 
-
-# ---------------------------------------------------------------------------
-# Collate
-# ---------------------------------------------------------------------------
-
-def lcr_collate_fn(batch): 
-    #prepare the data for the pytorch's DataLoader to handle variable-length sequences by padding them to the same length within a batch.
-    # It receives a batch of variable-length sequences (context) from __getitem__, 
-    # finds the longest sequence in the batch
-    #  add zeros to sequences shorter than the longest sequence (to the attention mask as well as the input_ids)
-    """
-    Pads input_ids and attention_mask to the longest sequence in the batch.
-    Returns:
-        input_ids      : LongTensor [B, max_seq_len]
-        attention_mask : LongTensor [B, max_seq_len]
-        cited_paper_id : LongTensor [B]
-    """
-    max_len = max(len(x["input_ids"]) for x in batch)
-
-    input_ids      = []
-    attention_mask = []
-    cited_ids      = []
-
-    for x in batch:
-        seq_len = len(x["input_ids"])
-        pad_len = max_len - seq_len
-
-        input_ids.append(x["input_ids"] + [0] * pad_len)
-        attention_mask.append(x["attention_mask"] + [0] * pad_len)
-        cited_ids.append(x["cited_paper_id"])
-
-    return {
-        "input_ids":      torch.tensor(input_ids,      dtype=torch.long),
-        "attention_mask": torch.tensor(attention_mask, dtype=torch.long),
-        "cited_paper_id": torch.tensor(cited_ids,      dtype=torch.long),
-    }
+    # Return average loss over all batches and total time taken for this epoch
+    return total_loss / max(n_batches, 1), time.time() - t0
 
 
 # ---------------------------------------------------------------------------
-# Builder 
+# Main
 # ---------------------------------------------------------------------------
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", required=True)
+    cfg = load_config(parser.parse_args().config)
 
-def build_datasets(
-    all_contexts_path: str,
-    node_index_path:   str,
-    tokenizer_name:    str  = "allenai/scibert_scivocab_uncased",
-    max_length:        int  = 256,
-    train_ratio:       float = 0.8,
-    val_ratio:         float = 0.1,
-    seed:              int   = 42,
-) -> dict:
-    """
-    Loads all_contexts.json, filters, maps URIs → integer IDs,
-    splits into train/val/test, and returns LCRDataset objects.
+    # Print config so every run is self-documented in the logs
+    print("=" * 60)
+    print(f"  Experiment : {cfg['experiment_name']}")
+    for k, v in cfg.items():
+        print(f"    {k:20s} = {v}")
+    print("=" * 60 + "\n")
 
-    Returns
-    -------
-    {
-        "train": LCRDataset,
-        "val":   LCRDataset,
-        "test":  LCRDataset,
-        "tokenizer": tokenizer,
-        "n_papers":  int,        # total number of paper nodes (corpus + external)
-    }
-    """
-    # --- Load node index ---> mapping for all papers from node_index.json by  {uri → int_id} 
-    print(f"Loading node index from {node_index_path} ...")
-    with open(node_index_path, encoding="utf-8") as f:
-        node_index = json.load(f)
-    paper_uri_to_id = node_index["paper"]   # {uri: int_id}
-    n_papers = len(paper_uri_to_id)
-    print(f"  {n_papers:,} paper nodes in KG")
+    # Seeding
+    random.seed(cfg["seed"])
+    np.random.seed(cfg["seed"])
+    torch.manual_seed(cfg["seed"])
+    torch.cuda.manual_seed(cfg["seed"])
 
-    # --- Load and filter records ---> iterates every record and build a flat list of CitationRecord objects from all_contexts.json
-    print(f"Loading contexts from {all_contexts_path} ...")
-    with open(all_contexts_path, encoding="utf-8") as f:
-        raw = json.load(f)
-    print(f"  {len(raw):,} raw records")
+    device    = torch.device(f"cuda:{cfg['gpu']}" if torch.cuda.is_available() else "cpu")
+    data_root = os.path.expanduser(cfg["data_root"])
+    ckpt_dir  = os.path.join(os.path.expanduser(cfg["output_dir"]), cfg["experiment_name"])
+    os.makedirs(ckpt_dir, exist_ok=True)
 
-    records = []
-    skipped = 0
-    for item in raw:
-        cited_uri    = item.get("cited_uri", "")
-        context_text = item.get("context", "").strip()
-        citing_uri   = item.get("citing_uri", "")
-        citation_type   = item.get("citation_type", "")
-        # skip records with missing context or missing cited uri
-        if not context_text:
-            skipped += 1
-            continue
-        if not citation_type:
-            skipped += 1
-            continue
-        if cited_uri not in paper_uri_to_id:
-            skipped += 1
-            continue
+    # Save config copy into checkpoint folder for full reproducibility
+    with open(os.path.join(ckpt_dir, "config.json"), "w") as f:
+        json.dump(cfg, f, indent=2)
 
-        records.append(CitationRecord(
-            context_text   = context_text,
-            cited_paper_id = paper_uri_to_id[cited_uri],
-            cited_uri      = cited_uri,
-            citing_uri     = citing_uri,
-            citation_type  = citation_type,
-        ))
+    # --- Datasets ---
+    datasets = build_datasets(
+        all_contexts_path = os.path.join(data_root, "all_contexts_grouped.json"),
+        node_index_path   = os.path.join(data_root, "node_index.json"),
+        max_length        = cfg["max_length"],
+        seed              = cfg["seed"],
+    )
 
-    print(f"  {len(records):,} records kept, {skipped:,} skipped")
-
-    # --- Deterministic shuffle + split ---> shuffle the the list of CitationRecord "seed"=42 then split to 80/10/10 train/val/test
-    # ---> split by citing URI's 80/10/10
-    citing_uris = list({r.citing_uri for r in records})
-    rng = random.Random(seed)
-    rng.shuffle(citing_uris)
+    # Batch formulation using GroupAwareBatchSampler:
+    # guarantees no two records sharing the same context_group_id (i.e. same citation
+    # context from a multi-citation marker like [1,2,3]) ever appear in the same batch.
+    # This prevents InfoNCE from treating a co-cited paper as a false negative.
+    train_batch_sampler = GroupAwareBatchSampler(
+        group_ids  = [r.context_group_id for r in datasets["train"].records],
+        batch_size = cfg["batch_size"],
+        seed       = cfg["seed"],
+    )
+    train_loader = DataLoader(datasets["train"],
+                              batch_sampler = train_batch_sampler,  # replaces batch_size + shuffle
+                              collate_fn    = lcr_collate_fn,
+                              num_workers   = 8,
+                              pin_memory    = True)
     
-    n_uris       = len(citing_uris)
-    n_train_uris = int(n_uris * train_ratio)
-    n_val_uris   = int(n_uris * val_ratio)
     
-    train_uris = set(citing_uris[:n_train_uris])
-    val_uris   = set(citing_uris[n_train_uris : n_train_uris + n_val_uris])
-    test_uris  = set(citing_uris[n_train_uris + n_val_uris :])
-    
-    train_records = [r for r in records if r.citing_uri in train_uris]
-    val_records   = [r for r in records if r.citing_uri in val_uris]
-    test_records  = [r for r in records if r.citing_uri in test_uris]
+    val_loader   = DataLoader(datasets["val"],
+                              batch_size  = cfg["batch_size"],
+                              shuffle     = False,
+                              collate_fn  = lcr_collate_fn,
+                              num_workers = 8,
+                              pin_memory  = True)
 
-    print(f"  Split → train {len(train_records):,} / val {len(val_records):,} / test {len(test_records):,}")
+    # --- Metapath features (precomputed, stored on disk, never change) ---
+    print("Loading metapath features ...")
+    all_paper_feats = {}
+    for key in cfg["feat_keys"]:
+        all_paper_feats[key] = torch.load(
+            os.path.join(data_root, f"feat_{key}.pt"), map_location="cpu")
+        print(f"  feat_{key}: {all_paper_feats[key].shape}")
 
-    # --- Tokenizer ---> load tokenizer and wrap each split train/val/test inside LCRDataset (a custom PyTorch Dataset class)
-    print(f"Loading tokenizer ({tokenizer_name}) ...")
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+    # --- Full candidate pool (corpus + external papers) ---
+    all_candidate_ids = torch.cat([
+        torch.load(os.path.join(data_root, "corpus_ids.pt"),   map_location="cpu"),
+        torch.load(os.path.join(data_root, "external_ids.pt"), map_location="cpu"),
+    ]).unique()
+    print(f"Total candidates: {len(all_candidate_ids):,}\n")
 
-    return {
-        "train":     LCRDataset(train_records, tokenizer, max_length),
-        "val":       LCRDataset(val_records,   tokenizer, max_length),
-        "test":      LCRDataset(test_records,  tokenizer, max_length),
-        "tokenizer": tokenizer,
-        "n_papers":  n_papers,
+    # --- Models ---
+    paper_tower = PaperTower(
+        feat_keys=cfg["feat_keys"],
+        nfeat=768, # fixed because it's the dimension output by SciBERT-based features when precomputeing metapath features 
+        num_heads = cfg["num_heads"],
+        hidden=cfg["hidden"],
+        embed_dim=cfg["embed_dim"],
+        n_fp_layers=cfg["n_fp_layers"],
+        dropout=cfg["dropout"],
+        input_drop=cfg["input_drop"],
+        use_mlp = cfg["use_mlp"],
+    ).to(device)
+
+    context_tower = ContextTower(
+        embed_dim=cfg["embed_dim"], dropout=cfg["input_drop"],
+    ).to(device)
+
+    print(f"PaperTower params  : {sum(p.numel() for p in paper_tower.parameters()):,}")
+    print(f"ContextTower params: {sum(p.numel() for p in context_tower.parameters()):,}\n")
+
+    optimizer = torch.optim.Adam([
+        *context_tower.get_param_groups(cfg["lr_scibert"], cfg["lr_head"]),
+        {"params": paper_tower.parameters(), "lr": cfg["lr_paper"]},
+    ])
+    scaler = torch.amp.GradScaler('cuda')
+
+    # --- Training loop ---
+    best_mrr, best_epoch, patience_ctr = 0.0, 0, 0
+    history        = []
+    training_start = time.time()
+
+    for epoch in range(1, cfg["epochs"] + 1):
+
+        # Reseed the sampler each epoch so batch composition varies (mirrors shuffle=True)
+        train_batch_sampler.set_epoch(epoch)
+
+        # Build frozen index before training — used only for evaluation
+        candidate_embs = build_candidate_index(
+            paper_tower, all_paper_feats, all_candidate_ids, device)
+
+        train_loss, epoch_secs = train_one_epoch(
+            context_tower, paper_tower, train_loader, optimizer,
+            scaler, all_paper_feats, device, cfg["temperature"], epoch)
+
+        print(f"Epoch {epoch:3d} | loss={train_loss:.4f} | time={epoch_secs:.1f}s", end="")
+
+        metrics = evaluate(context_tower, val_loader, candidate_embs, all_candidate_ids, device)
+        print(f" | R@1={metrics.get('Recall@1',0):.4f}"
+              f" R@10={metrics.get('Recall@10',0):.4f}"
+              f" MRR={metrics.get('MRR',0):.4f}"
+              f" nDCG@10={metrics.get('nDCG@10',0):.4f}"
+              f" (n={metrics.get('n_queries',0):,})")
+
+        history.append({"epoch": epoch, "train_loss": train_loss,
+                        "epoch_secs": round(epoch_secs, 2), **metrics})
+
+        # Checkpoint if improved
+        val_mrr = metrics.get("MRR", 0.0)
+        if val_mrr > best_mrr:
+            best_mrr, best_epoch, patience_ctr = val_mrr, epoch, 0
+            torch.save({"epoch": epoch, "paper_tower": paper_tower.state_dict(),
+                        "context_tower": context_tower.state_dict(),
+                        "optimizer": optimizer.state_dict(),
+                        "val_mrr": best_mrr, "metrics": metrics, "config": cfg},
+                       os.path.join(ckpt_dir, "best_model.pt"))
+            print(f"  ✓ New best MRR={best_mrr:.4f} — saved")
+        else:
+            patience_ctr += 1
+            print(f"  (patience {patience_ctr}/{cfg['patience']})")
+            if patience_ctr >= cfg["patience"]:
+                print(f"\nEarly stopping — best MRR={best_mrr:.4f} at epoch {best_epoch}")
+                break
+
+    total = time.time() - training_start
+
+    # Save training history + total training time summary
+    summary = {
+        "best_mrr":                best_mrr,
+        "best_epoch":              best_epoch,
+        "total_training_time_h":   round(total / 3600, 4),  # e.g. 1.2345 hours
+        "epochs_run":              len(history),
+        "split_sizes": {
+            "train": len(datasets["train"]),
+            "val":   len(datasets["val"]),
+            "test":  len(datasets["test"]),
+        },
+        "history":                 history,
     }
+    with open(os.path.join(ckpt_dir, "history.json"), "w") as f:
+        json.dump(summary, f, indent=2)
+
+    print(f"\nBest MRR={best_mrr:.4f} at epoch {best_epoch}")
+    print(f"Total training time: {total/3600:.2f}h ({total/60:.1f} min)")
 
 
-# ---------------------------------------------------------------------------
-# Smoke test
-# ---------------------------------------------------------------------------
-# if __name__ == "__main__":
-#     import os
-#     from torch.utils.data import DataLoader
-
-#     BASE = os.path.expanduser("~/HGNN/shared/data_prep")
-
-#     result = build_datasets(
-#         all_contexts_path = os.path.join(BASE, "all_contexts.json"),
-#         node_index_path   = os.path.join(BASE, "node_index.json"),
-#         max_length        = 256,
-#     )
-
-#     for split in ("train", "val", "test"):
-#         ds = result[split]
-#         print(f"\n{split}: {len(ds):,} samples")
-#         sample = ds[0]
-#         print(f"  input_ids length : {len(sample['input_ids'])}")
-#         print(f"  cited_paper_id   : {sample['cited_paper_id']}")
-
-#     # DataLoader with collate
-#     loader = DataLoader(
-#         result["train"],
-#         batch_size=8,
-#         shuffle=True,
-#         collate_fn=lcr_collate_fn,
-#     )
-#     batch = next(iter(loader))
-#     print(f"\nBatch shapes:")
-#     print(f"  input_ids      : {batch['input_ids'].shape}")
-#     print(f"  attention_mask : {batch['attention_mask'].shape}")
-#     print(f"  cited_paper_id : {batch['cited_paper_id'].shape}")
-#     print(f"  cited_paper_id values: {batch['cited_paper_id'].tolist()}")
-#     print(f"\nTotal paper nodes: {result['n_papers']:,}")
-#     print("\nStep C complete.")
+if __name__ == "__main__":
+    main()

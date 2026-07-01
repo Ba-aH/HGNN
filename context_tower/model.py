@@ -76,34 +76,26 @@ class ContextTower(nn.Module):
     # ------------------------------------------------------------------
     def forward(
         self,
-        input_ids: torch.Tensor,
-        attention_mask: torch.Tensor,
+        input_ids: torch.Tensor,       # [B, seq_len] tokenized citation context
+        attention_mask: torch.Tensor,  # [B, seq_len] 1 for real tokens, 0 for padding
     ) -> torch.Tensor:
-        """
-        Parameters
-        ----------
-        input_ids      : LongTensor [B, seq_len]
-        attention_mask : LongTensor [B, seq_len]
 
-        Returns
-        -------
-        Tensor [B, embed_dim], L2-normalised.
-        """
-        # SciBERT forward — returns (last_hidden_state, pooler_output, ...)
+        # Run SciBERT — each of the seq_len tokens gets a 768-dim contextual representation
         outputs = self.scibert(
             input_ids=input_ids,
             attention_mask=attention_mask,
         )
 
-        # CLS token: first position of last hidden state → [B, 768]
+        # Take only the [CLS] token (position 0) as the sentence-level embedding → [B, 768]
+        # [CLS] is a special token prepended to every input, trained to summarize the whole sequence
         cls_emb = outputs.last_hidden_state[:, 0, :]
 
-        # Project into shared embedding space
-        x = self.dropout(cls_emb)
-        x = self.proj(x)       # [B, embed_dim]
-        x = self.norm(x)       # LayerNorm
+        # Project into shared embedding space so both towers output the same dimension
+        x = self.dropout(cls_emb)  # randomly zero some dimensions to prevent overfitting
+        x = self.proj(x)           # Linear(768 → embed_dim)
+        x = self.norm(x)           # LayerNorm stabilises activations before normalisation
 
-        # L2 normalise → unit sphere
+        # L2 normalise → place embedding on unit sphere so dot product = cosine similarity
         return F.normalize(x, p=2, dim=-1)
 
     # ------------------------------------------------------------------
@@ -124,43 +116,3 @@ class ContextTower(nn.Module):
         ]
 
 
-# ---------------------------------------------------------------------------
-# Smoke test
-# ---------------------------------------------------------------------------
-# if __name__ == "__main__":
-#     from transformers import AutoTokenizer
-
-#     embed_dim = 256
-#     model = ContextTower(embed_dim=embed_dim)
-#     print(model)
-
-#     scibert_params = sum(p.numel() for p in model.scibert.parameters())
-#     head_params    = sum(p.numel() for p in model.proj.parameters()) \
-#                    + sum(p.numel() for p in model.norm.parameters())
-#     print(f"\nSciBERT params : {scibert_params:,}")
-#     print(f"Head params    : {head_params:,}")
-#     print(f"Total params   : {scibert_params + head_params:,}")
-
-#     # Tokenise two fake citing passages
-#     tokenizer = AutoTokenizer.from_pretrained("allenai/scibert_scivocab_uncased")
-#     passages = [
-#         "Graph neural networks have been widely adopted for node classification [CITATION].",
-#         "As shown by [CITATION], attention mechanisms improve heterogeneous graph learning.",
-#     ]
-#     enc = tokenizer(passages, padding=True, truncation=True,
-#                     max_length=128, return_tensors="pt")
-
-#     model.eval()
-#     with torch.no_grad():
-#         out = model(enc["input_ids"], enc["attention_mask"])
-
-#     print(f"\nInput:  {len(passages)} passages")
-#     print(f"Output: {out.shape}  (expected [{len(passages)}, {embed_dim}])")
-#     norms = out.norm(dim=-1)
-#     print(f"Output norms: {norms.tolist()}  (expected all ≈ 1.0)")
-
-#     # Check param groups
-#     groups = model.get_param_groups()
-#     print(f"\nParam groups: {len(groups)} groups")
-#     print(f"  Group 0 (SciBERT) lr={groups[0]['lr']}")
-#     print(f"  Group 1 (head)    lr={groups[1]['lr']}")

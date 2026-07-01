@@ -1,7 +1,7 @@
 {
   "data_root": "~/HGNN/shared/data_prep",
-  "output_dir": "~/HGNN/configs/P+PP/no_MLP",
-  "n_fp_layers": 2,     "note1": "ignored when use_mlp=False (LinearPerMetapath is skipped entirely) — kept here for config-copy consistency across the sweep.",
+  "output_dir": "~/HGNN/configs/P+PP/MLP_768",
+  "n_fp_layers": 2,     "note1": "number of LinearPerMetapath projection layers inside PaperTower. Each layer transforms the metapath features through a learned weight matrix.",
   "dropout": 0.3,       "note3": "randomly zeros 30% of activations during training inside PaperTower to prevent overfitting. Disabled at evaluation time",
   "input_drop": 0.1,    "note4": "randomly zeros 10% of input features during training inside PaperTower to prevent overfitting. Disabled at evaluation time",
   "temperature": 0.07,  "note5": "scales the similarity scores in the InfoNCE loss. Lower value makes the loss sharper and more sensitive to small differences between positive and negative pairs. 0.07 is the standard value from contrastive learning literature.",
@@ -15,16 +15,16 @@
   "seed": 42,           "note10": "fixed random seed generator for reproducibility",
   "gpu": 0,             "note11": "index of the GPU to use for training. 0 means the first GPU in the system.",
   "eval_every": 1,
-  "experiment_name": "exp_PP_noMLP",
+  "experiment_name": "exp_PP_MLP_hidden768",
 
   "feat_keys": [
     "P",
     "PP"
   ],
   "num_heads": 1,        "note13": "number of attention heads in the cross-metapath self-attention layer inside PaperTower. 1 means no multi-head attention.",
-  "embed_dim": 768,     "note12": "the size of the final output vector from both towers",
-  "hidden": 768,        "note2": "with use_mlp=False the Transformer runs at nfeat=768 directly; hidden here only sets fc_after_concat's output size, so it's kept equal to embed_dim.",
-  "use_mlp": false,     "note14": "skips LinearPerMetapath entirely — raw 768-dim metapath features go straight into the Transformer. This is the no-MLP baseline.",
+  "embed_dim": 768,     "note12": "the size of the final output vector from both towers — kept fixed at 768 across the sweep so it always matches ContextTower.",
+  "hidden": 768,        "note2": "hidden dim of LinearPerMetapath and the Transformer (use_mlp=True routes features through hidden=768 before fusion — same width as nfeat, no bottleneck/expansion).",
+  "use_mlp": true,       "note14": "runs metapath features through LinearPerMetapath (nfeat=768 -> hidden=768) before the Transformer.",
   "att_drop": 0.1,      "note15": "dropout applied to attention weights inside the Transformer (cross-metapath fusion), to prevent overfitting on attention scores.",
   "act": "none",  "note16": "activation applied to attention scores before softmax inside the Transformer. Options: sigmoid, relu, leaky_relu, none.",
   "residual": true,     "note17": "adds a skip connection from mean(inputs) -> hidden, added to the fc_after_concat output before the final projection.",
