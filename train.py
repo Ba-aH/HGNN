@@ -18,7 +18,6 @@ Evaluation metrics: Recall@K (K=1,5,10,20), MRR, nDCG@10
 
 Usage:
     python train.py --config configs/exp01_PP_768.json
-    nohup python train.py --config configs/P+PP/no_MLP/experience.json >myoutfile 2>&1 &
 """
 
 import os
@@ -61,22 +60,28 @@ def load_config(path: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# InfoNCE contrastive loss
-# For each context in the batch, the cited paper is the positive and the
-# other (batch_size - 1) papers are the negatives.
+# InfoNCE contrastive loss — plain single-positive, diagonal target
+#
+# Exactly one correct column per row (the diagonal): row i's only positive
+# is paper_emb[i], everything else in the batch is a negative. No group-based
+# masking or multi-positive averaging — cited_uri is the sole ground truth
+# for its row and nothing is relaxed.
+#
+# This is safe against the "sibling rows with identical context_text" problem
+# (a multi-citation marker like [1,2,3] producing several records that share
+# context_text but point to different cited papers) only because
+# GroupAwareBatchSampler already guarantees no two records from the same
+# context_group_id ever co-occur in a batch. The loss itself doesn't need to
+# know group_ids exist — the sampler upstream has made every row's negatives
+# trustworthy by construction.
 # ---------------------------------------------------------------------------
 def infonce_loss(ctx_emb, paper_emb, temperature):
     # Compute similarity between every context and every paper in the batch → [B, B]
-    # Dividing by temperature sharpens the distribution: lower = more confident
     logits = torch.matmul(ctx_emb, paper_emb.T) / temperature
-
-    # Ground truth: diagonal entries are the correct (context, paper) pairs
-    # label i = i means context i should match paper i
     labels = torch.arange(logits.size(0), device=logits.device)
 
-    # Symmetric loss: penalise both directions equally
-    loss_c2p = F.cross_entropy(logits,   labels)   # context → paper: find the right paper for each context
-    loss_p2c = F.cross_entropy(logits.T, labels)   # paper → context: find the right context for each paper
+    loss_c2p = F.cross_entropy(logits,   labels)  # context → paper
+    loss_p2c = F.cross_entropy(logits.T, labels)  # paper → context
 
     return (loss_c2p + loss_p2c) / 2.0
 
@@ -267,9 +272,12 @@ def main():
     )
 
     # Batch formulation using GroupAwareBatchSampler:
-    # guarantees no two records sharing the same context_group_id (i.e. same citation
-    # context from a multi-citation marker like [1,2,3]) ever appear in the same batch.
-    # This prevents InfoNCE from treating a co-cited paper as a false negative.
+    # guarantees no two records sharing the same context_group_id (i.e. same
+    # citation context from a multi-citation marker like [1,2,3]) ever land in
+    # the SAME batch. Combined with the plain single-positive infonce_loss
+    # above, this keeps every row's negatives trustworthy — a sibling row's
+    # true paper never has to be scored as a negative against an identical
+    # context embedding.
     train_batch_sampler = GroupAwareBatchSampler(
         group_ids  = [r.context_group_id for r in datasets["train"].records],
         batch_size = cfg["batch_size"],
@@ -282,7 +290,14 @@ def main():
                               pin_memory    = True)
     
     
-    val_loader   = DataLoader(datasets["val"], batch_size=64,
+    val_loader   = DataLoader(datasets["val"], batch_size=cfg["batch_size"],
+                              shuffle=False, collate_fn=lcr_collate_fn,
+                              num_workers=4, pin_memory=True)
+
+    # Test loader — used only for the periodic curve-tracing eval every
+    # cfg["test_eval_every"] epochs (kept separate from val, which drives
+    # early stopping/checkpointing every epoch).
+    test_loader  = DataLoader(datasets["test"], batch_size=cfg["batch_size"],
                               shuffle=False, collate_fn=lcr_collate_fn,
                               num_workers=4, pin_memory=True)
 
@@ -333,6 +348,8 @@ def main():
     # --- Training loop ---
     best_mrr, best_epoch, patience_ctr = 0.0, 0, 0
     history        = []
+    test_history   = []
+    test_curve_path = os.path.join(ckpt_dir, "test_curve.json")
     training_start = time.time()
 
     for epoch in range(1, cfg["epochs"] + 1):
@@ -377,6 +394,33 @@ def main():
                 print(f"\nEarly stopping — best MRR={best_mrr:.4f} at epoch {best_epoch}")
                 break
 
+        # --- Periodic test-set evaluation (curve tracing) ---
+        # Uses a FRESH candidate index built from the model's weights AFTER this
+        # epoch's training step — unlike val above, which intentionally evaluates
+        # against the frozen pre-epoch snapshot. Costs one extra full pass over
+        # the candidate pool every test_eval_every epochs.
+        if epoch % cfg["test_eval_every"] == 0 or epoch == cfg["epochs"]:
+            post_train_candidate_embs = build_candidate_index(
+                paper_tower, all_paper_feats, all_candidate_ids, device)
+
+            test_metrics = evaluate(context_tower, test_loader, post_train_candidate_embs,
+                                    all_candidate_ids, device)
+            print(f"  [test @ epoch {epoch}]"
+                  f" R@1={test_metrics.get('Recall@1',0):.4f}"
+                  f" R@10={test_metrics.get('Recall@10',0):.4f}"
+                  f" MRR={test_metrics.get('MRR',0):.4f}"
+                  f" nDCG@10={test_metrics.get('nDCG@10',0):.4f}"
+                  f" (n={test_metrics.get('n_queries',0):,})")
+
+            test_history.append({"epoch": epoch, **test_metrics})
+
+            # Write after every eval, not just at the end, so the curve survives
+            # early stopping / crashes / preemption.
+            with open(test_curve_path, "w") as f:
+                json.dump({"experiment_name": cfg["experiment_name"],
+                           "test_eval_every": cfg["test_eval_every"],
+                           "history": test_history}, f, indent=2)
+
     total = time.time() - training_start
 
     
@@ -386,6 +430,7 @@ def main():
         "total_training_time_h":   round(total / 3600, 4),  # e.g. 1.2345 hours
         "epochs_run":              len(history),
         "history":                 history,
+        "test_history":            test_history,  # same data as test_curve.json, duplicated here for convenience
     }
     with open(os.path.join(ckpt_dir, "history.json"), "w") as f:
         json.dump(summary, f, indent=2)

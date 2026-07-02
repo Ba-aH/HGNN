@@ -1,0 +1,24 @@
+{
+    "context": "the incompatibility would help....",
+    "cited_uri": "https://citekg.org/resource/paper/15bbc2981a8615e1",
+    "citing_uri": "https://citekg.org/resource/paper/d3044d259dedc7a9",
+    "citing_idx": 0,
+    "citation_type": "single",
+    "context_group_id": 104
+  },
+  {
+    "context": "least two computational approaches to detect....",
+    "cited_uri": "https://citekg.org/resource/paper/e65cae5524ca9bd9",
+    "citing_uri": "https://citekg.org/resource/paper/d3044d259dedc7a9",
+    "citing_idx": 1,
+    "citation_type": "multiple",
+    "context_group_id": 59328
+  },
+  {
+    "context": "least two computational approaches to detect....",
+    "cited_uri": "https://citekg.org/resource/paper/73d070b3c683883b",
+    "citing_uri": "https://citekg.org/resource/paper/d3044d259dedc7a9",
+    "citing_idx": 2,
+    "citation_type": "multiple",
+    "context_group_id": 59328
+  },
