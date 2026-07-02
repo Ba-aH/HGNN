@@ -266,7 +266,7 @@ def main():
 
     # --- Datasets ---
     datasets = build_datasets(
-        all_contexts_path = os.path.join(data_root, "all_contexts_grouped.json"),
+        all_contexts_path = os.path.join(data_root, "all_contexts.json"),
         node_index_path   = os.path.join(data_root, "node_index.json"),
         max_length        = cfg["max_length"],
         seed              = cfg["seed"],
@@ -334,7 +334,9 @@ def main():
     ).to(device)
 
     context_tower = ContextTower(
-        embed_dim=cfg["embed_dim"], dropout=cfg["input_drop"],
+        embed_dim=cfg["embed_dim"], 
+        dropout=cfg["input_drop"],
+        scibert_model_name=cfg["scibert_model_name"], 
     ).to(device)
 
     print(f"PaperTower params  : {sum(p.numel() for p in paper_tower.parameters()):,}")
