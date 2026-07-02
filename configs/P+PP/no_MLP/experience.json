@@ -29,5 +29,6 @@
   "act": "none",  "note16": "activation applied to attention scores before softmax inside the Transformer. Options: sigmoid, relu, leaky_relu, none.",
   "residual": true,     "note17": "adds a skip connection from mean(inputs) -> hidden, added to the fc_after_concat output before the final projection.",
 
+  "test_eval_every": 10,
   "scibert_model_name": "allenai/scibert_scivocab_uncased"
 }
