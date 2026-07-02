@@ -17,7 +17,8 @@ Evaluation metrics: Recall@K (K=1,5,10,20), MRR, nDCG@10
     - Corpus index is a FROZEN SNAPSHOT built before each epoch's training step.
 
 Usage:
-    python train.py --config configs/exp01_PP_768.json
+    python train.py --config configs/P+PP/no_MLP/experience.json
+    nohup python train.py --config configs/P+PP/no_MLP/experience.json >myoutfile 2>&1 &
 """
 
 import os
