@@ -3,12 +3,15 @@ step2_encode_corpus_papers.py
 ─────────────────────────────
 Reads:
   abstracts.json   {paper_uri: abstract_text}
+  merged-kg.ttl    (dcterms:title per paper, used for the title text)
   node_index.json  (paper_id map)
   corpus_ids.pt    (which int IDs are corpus papers)
   paper_uris.json  (int_id → URI lookup)
 
-SciBERT-encodes each abstract (CLS token) in batches.
-Papers with no abstract entry get a zero vector and are flagged.
+SciBERT-encodes "{abstract} [SEP] {title}" (CLS token) in batches.
+Title is appended after the abstract; if a paper has no dcterms:title the
+abstract is encoded alone. Papers with no abstract entry get a zero vector
+and are flagged (title alone is not sufficient to produce a feature).
 
 Saves:
   feat_corpus_papers.pt        FloatTensor [N_corpus, 768]
@@ -19,13 +22,17 @@ import json
 from pathlib import Path
 
 import torch
+from rdflib import Graph, Namespace, URIRef
 from transformers import AutoTokenizer, AutoModel
 
+DCTERMS = Namespace("http://purl.org/dc/terms/")
+
 ABSTRACTS_FILE = "abstracts.json"
+KG_FILE        = "merged-kg.ttl"
 OUT_DIR        = Path(".")
 MODEL_NAME     = "allenai/scibert_scivocab_uncased"
 BATCH_SIZE     = 32
-MAX_LENGTH     = 512
+MAX_LENGTH     = 512 #SciBERT's max input length is 512 tokens cap
 DEVICE         = "cuda" if torch.cuda.is_available() else "cpu"
 
 # ── Load index structures ─────────────────────────────────────────────────────
@@ -48,6 +55,24 @@ print("Loading abstracts …")
 with open(ABSTRACTS_FILE) as f:
     abstracts: dict[str, str] = json.load(f)
 print(f"  Abstract entries: {len(abstracts):,}")
+
+# ── Load titles (dcterms:title) from the KG ───────────────────────────────────
+print(f"Loading titles from {KG_FILE} …")
+g = Graph()
+g.parse(KG_FILE, format="turtle")
+
+titles: dict[str, str] = {}
+for s, _, o in g.triples((None, DCTERMS.title, None)):
+    uri = str(s)
+    text = str(o).strip()
+    if text:
+        titles[uri] = text
+print(f"  Title entries: {len(titles):,}")
+
+n_corpus_missing_title = sum(1 for uri in corpus_uris if uri not in titles)
+if n_corpus_missing_title:
+    print(f"  [WARN] {n_corpus_missing_title} corpus papers have no dcterms:title — "
+          f"abstract will be used alone for those.")
 
 # ── Load SciBERT ──────────────────────────────────────────────────────────────
 print(f"Loading SciBERT on {DEVICE} …")
@@ -79,12 +104,19 @@ for batch_start in range(0, N_corpus, BATCH_SIZE):
     batch_local_idx = []   # positions within this batch that have real text
 
     for local_i, uri in enumerate(batch_uris):
-        text = abstracts.get(uri, "").strip()
-        if text:
-            batch_texts.append(text)
-            batch_local_idx.append(local_i)
-        else:
+        abstract_text = abstracts.get(uri, "").strip()
+        if not abstract_text:
             missing.append(uri)
+            continue
+
+        title_text = titles.get(uri, "").strip()
+        # Title appended at the end of the abstract, separated by SciBERT's
+        # [SEP] token so the encoder still sees it as a distinct segment
+        # rather than a run-on sentence.
+        text = f"{abstract_text} [SEP] {title_text}" if title_text else abstract_text
+
+        batch_texts.append(text)
+        batch_local_idx.append(local_i)
 
     if batch_texts:
         vecs = encode_texts(batch_texts)   # [len(batch_texts), 768]
