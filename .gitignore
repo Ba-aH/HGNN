@@ -14,6 +14,9 @@ shared/data_prep/merged-kg.ttl
 shared/data_prep/context_flat.json
 configs/P+PP/no_MLP/exp_PP_noMLP
 configs/P+PP/no_MLP/**/
+configs/P+PP/MLP_500/**/
+configs/P+PP/MLP_768/**/
+configs/P+PP/MLP_900/**/
 myoutfile
 
 # --- Checkpoints ---
