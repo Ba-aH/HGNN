@@ -6,7 +6,7 @@
   "input_drop": 0.1,    "note4": "randomly zeros 10% of input features during training inside PaperTower to prevent overfitting. Disabled at evaluation time",
   "temperature": 0.07,  "note5": "scales the similarity scores in the InfoNCE loss. Lower value makes the loss sharper and more sensitive to small differences between positive and negative pairs. 0.07 is the standard value from contrastive learning literature.",
   "epochs": 35,
-  "batch_size": 64,
+  "batch_size": 128,
   "max_length": 256,    "note6": "maximum number of tokens SciBERT reads from each citation context",
   "lr_scibert": 2e-6,   "note7":"learning rate for SciBERT weights (verry low). Very small because SciBERT is already pretrained on scientific text —> we fine-tune it gently rather than retrain it",
   "lr_head": 1e-3,      "note8":"learning rate for the projection head weights. Higher because these weights are randomly initialized and need to learn quickly.",
