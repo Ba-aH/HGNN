@@ -11,7 +11,7 @@
   "lr_scibert": 2e-6,   "note7":"learning rate for SciBERT weights (verry low). Very small because SciBERT is already pretrained on scientific text —> we fine-tune it gently rather than retrain it",
   "lr_head": 1e-3,      "note8":"learning rate for the projection head weights. Higher because these weights are randomly initialized and need to learn quickly.",
   "lr_paper": 1e-3,     "note9":"learning rate for the PaperTower weights. Higher because these weights are randomly initialized and need to learn quickly.",
-  "patience": 7,
+  "patience": 35,
   "seed": 42,           "note10": "fixed random seed generator for reproducibility",
   "gpu": 0,             "note11": "index of the GPU to use for training. 0 means the first GPU in the system.",
   "eval_every": 1,
@@ -29,6 +29,6 @@
   "act": "none",  "note16": "activation applied to attention scores before softmax inside the Transformer. Options: sigmoid, relu, leaky_relu, none.",
   "residual": true,     "note17": "adds a skip connection from mean(inputs) -> hidden, added to the fc_after_concat output before the final projection.",
 
-  "test_eval_every": 10,
+  "test_eval_every": 5,
   "scibert_model_name": "allenai/scibert_scivocab_uncased"
 }
