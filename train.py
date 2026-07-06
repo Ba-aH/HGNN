@@ -270,6 +270,7 @@ def main():
         node_index_path   = os.path.join(data_root, "node_index.json"),
         max_length        = cfg["max_length"],
         seed              = cfg["seed"],
+        split_path        = os.path.join(data_root, "split_uris.json"),
     )
 
     # Batch formulation using GroupAwareBatchSampler:

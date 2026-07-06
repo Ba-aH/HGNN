@@ -152,10 +152,27 @@ def build_datasets(
     train_ratio:       float = 0.8,
     val_ratio:         float = 0.1,
     seed:              int   = 42,
+    split_path:        Optional[str] = None,
 ) -> dict:
     """
     Loads all_contexts.json, filters, maps URIs → integer IDs,
     splits into train/val/test, and returns LCRDataset objects.
+
+    Split behavior
+    --------------
+    If `split_path` is given and the file exists, the train/val/test
+    citing_uri lists are loaded directly from it (see freeze_split.py) —
+    the seed/shuffle logic below is skipped entirely, so the split cannot
+    silently drift even if all_contexts.json / node_index.json change later.
+
+    If `split_path` is given but the file does NOT exist yet, this function
+    falls back to the seed-based shuffle-and-split below, and then WRITES
+    the resulting citing_uri lists to `split_path` — so the very first run
+    freezes the split for everything after it.
+
+    If `split_path` is None, behavior is unchanged from before: the split is
+    recomputed every call from (seed, current data files). This keeps old
+    call sites working exactly as before if they don't pass split_path.
 
     Returns
     -------
@@ -215,25 +232,63 @@ def build_datasets(
 
     print(f"  {len(records):,} records kept, {skipped:,} skipped")
 
-    # --- Deterministic shuffle + split ---> shuffle the the list of CitationRecord "seed"=42 then split to 80/10/10 train/val/test
-    # ---> split by citing URI's 80/10/10
-    citing_uris = list({r.citing_uri for r in records})
-    rng = random.Random(seed)
-    rng.shuffle(citing_uris)
-    
-    n_uris       = len(citing_uris)
-    n_train_uris = int(n_uris * train_ratio)
-    n_val_uris   = int(n_uris * val_ratio)
-    
-    train_uris = set(citing_uris[:n_train_uris])
-    val_uris   = set(citing_uris[n_train_uris : n_train_uris + n_val_uris])
-    test_uris  = set(citing_uris[n_train_uris + n_val_uris :])
-    
+    # --- Split: frozen file (preferred) or deterministic shuffle (fallback) ---
+    #
+    # Loading a frozen split_uris.json (produced once by freeze_split.py) makes
+    # the train/val/test partition immune to later changes in all_contexts.json
+    # / node_index.json — the exact same citing_uris always land in the same
+    # bucket, so comparisons across experiments trained at different times stay
+    # apples-to-apples. Without split_path (or on the very first run before the
+    # file exists), we fall back to the original seed-based shuffle-and-split,
+    # and — if split_path was given — persist that result so all future runs
+    # pick up the frozen file from here on.
+    used_frozen_split = False
+    if split_path is not None and os.path.exists(split_path):
+        print(f"Loading frozen split from {split_path} ...")
+        with open(split_path, encoding="utf-8") as f:
+            frozen = json.load(f)
+        train_uris = set(frozen["train"])
+        val_uris   = set(frozen["val"])
+        test_uris  = set(frozen["test"])
+        used_frozen_split = True
+    else:
+        citing_uris = list({r.citing_uri for r in records})
+        rng = random.Random(seed)
+        rng.shuffle(citing_uris)
+
+        n_uris       = len(citing_uris)
+        n_train_uris = int(n_uris * train_ratio)
+        n_val_uris   = int(n_uris * val_ratio)
+
+        train_uris = set(citing_uris[:n_train_uris])
+        val_uris   = set(citing_uris[n_train_uris : n_train_uris + n_val_uris])
+        test_uris  = set(citing_uris[n_train_uris + n_val_uris :])
+
+        if split_path is not None:
+            print(f"No frozen split found at {split_path} — computing it now "
+                  f"and saving it so future runs are locked to it.")
+            os.makedirs(os.path.dirname(os.path.abspath(split_path)) or ".", exist_ok=True)
+            with open(split_path, "w", encoding="utf-8") as f:
+                json.dump({
+                    "train": sorted(train_uris),
+                    "val":   sorted(val_uris),
+                    "test":  sorted(test_uris),
+                    "meta": {
+                        "seed": seed,
+                        "train_ratio": train_ratio,
+                        "val_ratio": val_ratio,
+                        "n_kept": len(records),
+                        "n_skipped": skipped,
+                    },
+                }, f, indent=2)
+
     train_records = [r for r in records if r.citing_uri in train_uris]
     val_records   = [r for r in records if r.citing_uri in val_uris]
     test_records  = [r for r in records if r.citing_uri in test_uris]
 
-    print(f"  Split → train {len(train_records):,} / val {len(val_records):,} / test {len(test_records):,}")
+    split_source = "frozen file" if used_frozen_split else "seed-based shuffle"
+    print(f"  Split ({split_source}) → train {len(train_records):,} / "
+          f"val {len(val_records):,} / test {len(test_records):,}")
 
     # --- Tokenizer ---> load tokenizer and wrap each split train/val/test inside LCRDataset (a custom PyTorch Dataset class)
     print(f"Loading tokenizer ({tokenizer_name}) ...")
@@ -248,40 +303,3 @@ def build_datasets(
     }
 
 
-# ---------------------------------------------------------------------------
-# Smoke test
-# ---------------------------------------------------------------------------
-# if __name__ == "__main__":
-#     import os
-#     from torch.utils.data import DataLoader
-
-#     BASE = os.path.expanduser("~/HGNN/shared/data_prep")
-
-#     result = build_datasets(
-#         all_contexts_path = os.path.join(BASE, "all_contexts.json"),
-#         node_index_path   = os.path.join(BASE, "node_index.json"),
-#         max_length        = 256,
-#     )
-
-#     for split in ("train", "val", "test"):
-#         ds = result[split]
-#         print(f"\n{split}: {len(ds):,} samples")
-#         sample = ds[0]
-#         print(f"  input_ids length : {len(sample['input_ids'])}")
-#         print(f"  cited_paper_id   : {sample['cited_paper_id']}")
-
-#     # DataLoader with collate
-#     loader = DataLoader(
-#         result["train"],
-#         batch_size=8,
-#         shuffle=True,
-#         collate_fn=lcr_collate_fn,
-#     )
-#     batch = next(iter(loader))
-#     print(f"\nBatch shapes:")
-#     print(f"  input_ids      : {batch['input_ids'].shape}")
-#     print(f"  attention_mask : {batch['attention_mask'].shape}")
-#     print(f"  cited_paper_id : {batch['cited_paper_id'].shape}")
-#     print(f"  cited_paper_id values: {batch['cited_paper_id'].tolist()}")
-#     print(f"\nTotal paper nodes: {result['n_papers']:,}")
-#     print("\nStep C complete.")
