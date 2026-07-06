@@ -17,6 +17,9 @@ configs/P+PP/no_MLP/**/
 configs/P+PP/MLP_500/**/
 configs/P+PP/MLP_768/**/
 configs/P+PP/MLP_900/**/
+configs/P/**/
+configs/P+PP+PPCon/**/
+configs/P+PPCon/**/
 myoutfile
 
 # --- Checkpoints ---
