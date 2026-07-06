@@ -8,8 +8,8 @@ Reports: Recall@1, Recall@5, Recall@10, Recall@20, MRR, nDCG@10
 
 Usage:
     python evaluate.py \
-        --checkpoint ~/HGNN/configs/P+PP/MLP_500/exp_PP_MLP_hidden500(run1)/best_model.pt \
-        --config     ~/HGNN/configs/P+PP/MLP_500/exp_PP_MLP_hidden500(run1)/config.json \
+        --checkpoint ~/HGNN/configs/P+PP/no_MLP/best_model.pt \
+        --config     ~/HGNN/configs/P+PP/no_MLP/experience.json \
         --data_root  ~/HGNN/shared/data_prep
 
 --data_root defaults to cfg["data_root"] from the config file if not passed
@@ -90,12 +90,12 @@ def main():
     print(f" Val MRR        : {val_mrr:.4f}\n" if val_mrr is not None else " Val MRR        : ?\n")
 
     # --- Load dataset ---
-    # Must match train.py: grouped file (all_contexts_grouped.json), not the
+    # Must match train.py: grouped file (all_contexts.json), not the
     # raw all_contexts.json, since build_datasets() requires context_group_id
     # on every record and filters out anything missing it.
     print("Loading dataset ...")
     datasets = build_datasets(
-        all_contexts_path=os.path.join(data_root, "all_contexts_grouped.json"),
+        all_contexts_path=os.path.join(data_root, "all_contexts.json"),
         node_index_path=os.path.join(data_root, "node_index.json"),
         max_length=max_length,
         seed=cfg.get("seed", 42),
@@ -141,11 +141,16 @@ def main():
         n_fp_layers=cfg["n_fp_layers"],
         dropout=cfg["dropout"],
         input_drop=cfg["input_drop"],
+        att_drop=cfg["att_drop"], 
+        act=cfg["act"], 
+        residual=cfg["residual"], 
+        use_mlp=cfg["use_mlp"],
     ).to(device)
 
     context_tower = ContextTower(
         embed_dim=cfg["embed_dim"],
         dropout=cfg["input_drop"],
+        scibert_model_name=cfg["scibert_model_name"],
     ).to(device)
 
     paper_tower.load_state_dict(ckpt["paper_tower"])
