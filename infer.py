@@ -167,12 +167,20 @@ def main():
     paper_tower, context_tower = load_models(os.path.expanduser(args.checkpoint), device)
     tokenizer = AutoTokenizer.from_pretrained("allenai/scibert_scivocab_uncased")
 
-    # Load features and corpus
+    # Load features and full candidate pool (corpus + external papers — must
+    # match training, see all_candidate_ids in train.py, or externally-cited
+    # papers can never be recommended even though the model was trained
+    # against them as valid targets).
     feats = {k: torch.load(os.path.join(data_root, f"feat_{k}.pt"), map_location="cpu")
              for k in ["P", "PP"]}
-    corpus_ids = torch.load(os.path.join(data_root, "corpus_ids.pt"), map_location="cpu")
+    corpus_ids   = torch.load(os.path.join(data_root, "corpus_ids.pt"),   map_location="cpu")
+    external_ids = torch.load(os.path.join(data_root, "external_ids.pt"), map_location="cpu")
+    all_candidate_ids = torch.cat([corpus_ids, external_ids]).unique()
 
-    corpus_embs, corpus_ids_list = build_index(paper_tower, feats, corpus_ids, device)
+    print(f"Candidate pool: {len(corpus_ids):,} corpus + {len(external_ids):,} external "
+          f"= {len(all_candidate_ids):,} unique papers")
+
+    corpus_embs, corpus_ids_list = build_index(paper_tower, feats, all_candidate_ids, device)
 
     # Load node index
     with open(os.path.join(data_root, "node_index.json")) as f:
