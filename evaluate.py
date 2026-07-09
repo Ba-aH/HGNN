@@ -26,6 +26,8 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+from collections import defaultdict
+
 
 # --- Path setup ---
 ROOT = os.path.expanduser("~/HGNN")
@@ -64,29 +66,28 @@ def parse_args():
 
 def main():
     args = parse_args()
-    cfg = load_config(os.path.expanduser(args.config))
+    cfg = load_config(os.path.expanduser(args.config))  # load the experiment's saved config.json
 
-    # CLI overrides take priority; otherwise fall back to the experiment's own config.
-    data_root  = os.path.expanduser(args.data_root if args.data_root is not None else cfg["data_root"])
-    gpu        = args.gpu        if args.gpu        is not None else cfg.get("gpu", 0)
-    batch_size = args.batch_size if args.batch_size is not None else cfg["batch_size"]
-    max_length = args.max_length if args.max_length is not None else cfg["max_length"]
+    # This lets you re-point data_root/gpu/batch_size at eval time without
+    # touching the original training config.
+    data_root  =  cfg["data_root"]
+    gpu        =  cfg.get("gpu", 0)
+    batch_size =  cfg["batch_size"]
+    max_length = cfg["max_length"]
 
     ckpt_path = os.path.expanduser(args.checkpoint)
+    # Fall back to CPU automatically if no GPU is available (e.g. running locally)
     device = torch.device(f"cuda:{gpu}" if torch.cuda.is_available() else "cpu")
 
-    print("=" * 60)
-    print(f"  Experiment : {cfg.get('experiment_name', '?')}")
-    print(f"  Checkpoint : {ckpt_path}")
-    print(f"  Config     : {args.config}")
-    print(f"  Device     : {device}")
-    print("=" * 60 + "\n")
-
     # --- Load checkpoint (weights only — hyperparameters come from cfg, not ckpt) ---
+    # Model architecture args (hidden size, num_heads, use_mlp, etc.) always come
+    # from cfg, never from the checkpoint itself — the checkpoint only holds trained weights.
     print("Loading checkpoint ...")
-    ckpt = torch.load(ckpt_path, map_location="cpu")
+    ckpt = torch.load(ckpt_path, map_location="cpu")  # load to CPU first, move to device after building the model
     print(f" Saved at epoch : {ckpt.get('epoch', '?')}")
     val_mrr = ckpt.get("val_mrr")
+    # Report the validation MRR that was recorded at save time, if present (sanity check
+    # that this is indeed the best/expected checkpoint before running the full test)
     print(f" Val MRR        : {val_mrr:.4f}\n" if val_mrr is not None else " Val MRR        : ?\n")
 
     # --- Load dataset ---
@@ -98,19 +99,21 @@ def main():
         all_contexts_path=os.path.join(data_root, "all_contexts.json"),
         node_index_path=os.path.join(data_root, "node_index.json"),
         max_length=max_length,
-        seed=cfg.get("seed", 42),
+        seed=cfg.get("seed", 42),   # same seed as training -> same frozen train/val/test split
     )
     test_loader = DataLoader(
         datasets["test"],
         batch_size=batch_size,
-        shuffle=False,
+        shuffle=False,              # no need to shuffle for evaluation — order doesn't affect metrics
         collate_fn=lcr_collate_fn,
         num_workers=4,
-        pin_memory=True,
+        pin_memory=True,            # speeds up CPU->GPU transfer
     )
     print(f" Test samples : {len(datasets['test']):,}\n")
 
     # --- Load metapath features (only the ones this experiment actually uses) ---
+    # feat_keys comes from cfg, so only the exact feature set this experiment was
+    # trained with gets loaded (e.g. P+PP, or P+PP+PCCon) — avoids loading unused tensors.
     print("Loading metapath feature tensors ...")
     feat_keys = cfg["feat_keys"]
     all_paper_feats = {}
@@ -120,6 +123,10 @@ def main():
         print(f" feat_{key}: {all_paper_feats[key].shape}")
 
     # --- Load corpus + external IDs ---
+    # corpus_ids: papers that are part of the main dataset
+    # external_ids: papers cited by the corpus but not part of it (must still be
+    # candidates, otherwise queries citing them get wrongly skipped — this was
+    # the bug that caused 83% of validation queries to be skipped before the fix)
     corpus_ids = torch.load(os.path.join(data_root, "corpus_ids.pt"), map_location="cpu")
     external_ids = torch.load(os.path.join(data_root, "external_ids.pt"), map_location="cpu")
 
@@ -127,6 +134,8 @@ def main():
     print(f" External size  : {len(external_ids):,}")
 
     # Unified candidate pool
+    # Combine both ID sets into the single pool every query is ranked against.
+    # .unique() guards against any accidental overlap between corpus and external IDs.
     all_candidate_ids = torch.cat([corpus_ids, external_ids]).unique()  # ensure no duplicates
     candidate_ids_list = all_candidate_ids.tolist()
     print(f" Total candidates : {len(candidate_ids_list):,}\n")
@@ -179,29 +188,38 @@ def main():
     print(f" All candidate embeddings: {candidate_embs.shape}\n")
 
     # Global ID → position in candidate_embs
+    # pos is the position (index) of each paper ID inside the list candidate_ids_list
+    # enumerate(candidate_ids_list) = pairs of (position, paper_id) 
+    # We build global_to_pos as a fast reverse lookup table (ID → index) because the embedding matrix and
+    # similarity scores are indexed by position, while the ground-truth cited_id is given as a paper ID
+    # its an efficient way to map id back to its position in the candidate embedding matrix (precomputed tensors)
     global_to_pos = {gid: pos for pos, gid in enumerate(candidate_ids_list)}
 
     # --- Evaluation ---
     k_values = [1, 5, 10, 20]
-    recall_hits = {k: 0 for k in k_values}
+    recall_hits = {k: 0.0 for k in k_values}   # float: per-group contributions can be fractional (Option B)
     mrr_sum = 0.0
     ndcg_sum = 0.0
-    n_queries = 0
+    n_queries = 0        # will count GROUPS (context_group_id units), not raw citation rows
     n_skipped = 0
     all_ranks = []
+    group_ranks = defaultdict(list)  # context_group_id -> list of ranks for papers in that group
 
     print("Evaluating on test set ...")
     with torch.no_grad():
-        for batch in tqdm(test_loader, desc="Queries"):
+        for batch in tqdm(test_loader):
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
             cited_ids = batch["cited_paper_id"].tolist()
+            group_ids = batch["context_group_id"].tolist()
 
-            ctx_emb = context_tower(input_ids, attention_mask)  # [B, embed_dim]
+            ctx_emb = context_tower(input_ids, attention_mask)
+            sims = torch.matmul(ctx_emb, candidate_embs.T)
 
-            # Similarity against ALL candidates
-            sims = torch.matmul(ctx_emb, candidate_embs.T)  # [B, N_candidates]
-
+            # Phase 1: just compute each row's rank and file it under its group.
+            # No metric accumulation happens here anymore — that's Phase 2, after
+            # every row in the test set has been seen, since rows belonging to the
+            # same context_group_id can land in different batches.
             for i, cited_id in enumerate(cited_ids):
                 if cited_id not in global_to_pos:
                     n_skipped += 1
@@ -209,50 +227,36 @@ def main():
 
                 pos = global_to_pos[cited_id]
                 sim_row = sims[i]
-
-                # Compute rank
                 rank = int((sim_row > sim_row[pos]).sum().item()) + 1
 
-                all_ranks.append(rank)
+                all_ranks.append(rank)                    # raw rank, still tracked for rank-distribution stats
+                group_ranks[group_ids[i]].append(rank)     # bucket this rank under its context_group_id
 
-                for k in k_values:
-                    if rank <= k:
-                        recall_hits[k] += 1
+    # --- Phase 2: aggregate per context_group_id ---
+    # Now that every row in the test set has been ranked, group them by
+    # context_group_id and treat each group as ONE evaluation unit — a group
+    # with N cited papers contributes fractional Recall@K (papers found in
+    # top-K / N) and averaged MRR / nDCG, instead of N independent full-weight
+    # rows. This stops multi-citation contexts from dominating the average
+    # just because they have more cited papers than a single-citation context.
+    print("Aggregating metrics per context_group_id ...")
+    for group_id, ranks in group_ranks.items():
+        n_papers_in_group = len(ranks)
 
-                mrr_sum += 1.0 / rank
-                ndcg_sum += 1.0 / math.log2(rank + 1)
-                n_queries += 1
+        for k in k_values:
+            hits_in_group = sum(1 for r in ranks if r <= k)
+            recall_hits[k] += hits_in_group / n_papers_in_group
 
-    # --- Results ---
-    print("\n" + "="*65)
-    print(" FULL TEST SET RESULTS (Corpus + External)")
-    print("="*65)
-    print(f" Experiment        : {cfg.get('experiment_name', '?')}")
-    print(f" Queries evaluated : {n_queries:,}")
-    print(f" Skipped           : {n_skipped:,}  (should be near 0)")
-    print(f" Total candidates  : {len(candidate_ids_list):,}")
-    print("-"*65)
+        mrr_sum += sum(1.0 / r for r in ranks) / n_papers_in_group
+        ndcg_sum += sum(1.0 / math.log2(r + 1) for r in ranks) / n_papers_in_group
 
-    for k in k_values:
-        print(f" Recall@{k:<3} : {recall_hits[k] / n_queries:.4f} "
-              f"({recall_hits[k]:,} / {n_queries:,})")
-
-    print(f" MRR       : {mrr_sum / n_queries:.4f}")
-    print(f" nDCG@10   : {ndcg_sum / n_queries:.4f}")
-    print("="*65)
+        n_queries += 1   # one group = one query, regardless of how many papers it cites
 
     # Rank distribution
     if all_ranks:
         ranks = sorted(all_ranks)
         n = len(ranks)
-        print(f"\n Rank distribution (n={n:,}):")
-        print(f" Median rank : {ranks[n//2]}")
-        print(f" Mean rank   : {sum(ranks)/n:.1f}")
-        print(f" Rank=1      : {ranks.count(1):,} ({ranks.count(1)/n*100:.1f}%)")
-        print(f" Rank≤5      : {sum(r<=5 for r in ranks):,} ({sum(r<=5 for r in ranks)/n*100:.1f}%)")
-        print(f" Rank≤10     : {sum(r<=10 for r in ranks):,} ({sum(r<=10 for r in ranks)/n*100:.1f}%)")
-        print(f" Rank>100    : {sum(r>100 for r in ranks):,} ({sum(r>100 for r in ranks)/n*100:.1f}%)")
-
+        
     # Save results — tagged with experiment_name so results from different
     # experiments never collide if you later gather them into one place.
     results = {
