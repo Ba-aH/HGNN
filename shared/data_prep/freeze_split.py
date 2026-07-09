@@ -32,9 +32,9 @@ of how all_contexts.json / node_index.json change later.
 
 Usage:
     python freeze_split.py \
-        --all_contexts shared/data_prep/all_contexts.json \
-        --node_index   shared/data_prep/node_index.json \
-        --out          shared/data_prep/split_uris.json \
+        --all_contexts all_contexts.json \
+        --node_index   node_index.json \
+        --out          split_uris.json \
         --seed 42 --train_ratio 0.8 --val_ratio 0.1
 
 If --out already exists, the script refuses to overwrite unless --force is
