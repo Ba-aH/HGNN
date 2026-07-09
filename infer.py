@@ -13,7 +13,7 @@ Usage:
   --ttl_path ~/HGNN/shared/data_prep/merged-kg.ttl \
   --query "Discourse relations often carry ambiguous functions, where a single relation can simultaneously serve as both an elaboration and an argumentative justification. Prior annotation efforts have shown low inter-annotator agreement for these cases, particularly when examples and specifications are used to both illustrate a point and support a claim. Understanding this dual functionality is critical for improving discourse parsing and argument mining systems"
 
-  python infer.py   --checkpoint ~/HGNN/checkpoints/20260623_150134/best_model.pt   --ttl_path ~/HGNN/shared/data_prep/merged-kg.ttl   --query "n and formal comparisons of semantics. This paper focuses on the evaluation of arguments in weighted bipolar argumentation graphs. It extends our previous works on axiomatic foundations of semantics for unipolar graphs (support graphs [cite] and attack graphs [cite]). It defines principles that a semantics would satisfy in a bipolar setting. Such principles are very useful for judging and understanding the underpinnings of semantics, and also for comparing semantics of the same family, and those of different families. Some of the proposed principles are simple combinations of those proposed in [25, 26] Others are new and show how support and attack might be aggregated. The second contribution of the paper consists of analyzing existing semantics against the principles. The main conclusion is that extension semantics do not harness the potential of support relation. Indeed, when the attack relation is empty, the existing semantics declare all (supported, non-supported) arguments of a graph as equally accepted. Weighted semantics take into account supporters in this particular case,however they violate some key principles. The third contribution of the paper is the definition of a novel weigh"
+python infer.py   --checkpoint ~/HGNN/checkpoints/20260623_150134/best_model.pt   --ttl_path ~/HGNN/shared/data_prep/merged-kg.ttl   --query "n and formal comparisons of semantics. This paper focuses on the evaluation of arguments in weighted bipolar argumentation graphs. It extends our previous works on axiomatic foundations of semantics for unipolar graphs (support graphs [cite] and attack graphs [cite]). It defines principles that a semantics would satisfy in a bipolar setting. Such principles are very useful for judging and understanding the underpinnings of semantics, and also for comparing semantics of the same family, and those of different families. Some of the proposed principles are simple combinations of those proposed in [25, 26] Others are new and show how support and attack might be aggregated. The second contribution of the paper consists of analyzing existing semantics against the principles. The main conclusion is that extension semantics do not harness the potential of support relation. Indeed, when the attack relation is empty, the existing semantics declare all (supported, non-supported) arguments of a graph as equally accepted. Weighted semantics take into account supporters in this particular case,however they violate some key principles. The third contribution of the paper is the definition of a novel weigh"
 
 python infer.py   --checkpoint /home/jovyan/HGNN/configs/P+PP/no_MLP/exp_PP_noMLP/best_model.pt   --ttl_path ~/HGNN/shared/data_prep/merged-kg.ttl   --query "In assumption-based argumentation frameworks for default reasoning, arguments are constructed from a given knowledge base using assumptions that can be defeated by other assumptions. This approach integrates ideas from Dung’s abstract argumentation with default logic, allowing for non-monotonic reasoning through the computation of acceptable sets of assumptions. A key challenge lies in determining the computational complexity of finding admissible, preferred, or stable extensions in such frameworks, which often involves analyzing the tractability of credulous and skeptical acceptance problems under different semantics."
 
@@ -118,14 +118,17 @@ def build_index(paper_tower, feats, corpus_ids, device):
 
 
 @torch.no_grad()
-def recommend(query, context_tower, corpus_embs, corpus_ids_list,
-              tokenizer, uri_to_meta, device, topk=10, max_length=256):
-    enc = tokenizer(query, max_length=max_length, truncation=True,
-                    padding="max_length", return_tensors="pt")
+def recommend(query, context_tower, corpus_embs, corpus_ids_list, tokenizer, uri_to_meta, device, topk=10, max_length=256):
+    
+    # Encode the query text
+    enc = tokenizer(query, max_length=max_length, truncation=True, padding="max_length", return_tensors="pt")
     ctx_emb = context_tower(enc["input_ids"].to(device), enc["attention_mask"].to(device))
+    
+    # Calculate similarity between the encoded query (via context tower) and the papers embeddings (pre computed via paper tower)
     sims = torch.matmul(ctx_emb, corpus_embs.T).squeeze(0)
     scores, indices = sims.topk(topk)
 
+    # attach metadata (URI, title) to results
     results = []
     for rank, (idx, score) in enumerate(zip(indices.tolist(), scores.tolist()), 1):
         meta = uri_to_meta.get(corpus_ids_list[idx], {})
@@ -180,6 +183,7 @@ def main():
     print(f"Candidate pool: {len(corpus_ids):,} corpus + {len(external_ids):,} external "
           f"= {len(all_candidate_ids):,} unique papers")
 
+    # Precompute embeddings for every candidate paper for retrieval
     corpus_embs, corpus_ids_list = build_index(paper_tower, feats, all_candidate_ids, device)
 
     # Load node index

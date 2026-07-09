@@ -103,8 +103,8 @@ def build_candidate_index(paper_tower, all_paper_feats, candidate_ids, device):
     embs = []
     ids  = candidate_ids.tolist()
 
-    # Encode all 26K candidate papers in chunks of 512 
-    # The 512 paper then moved to CPU  memory to free up GPU memory for the next chunk to avoid GPU memory overflow
+    # Encode all 26K candidate contexts in chunks of 512 
+    # The 512 contexts then moved to CPU  memory to free up GPU memory for the next chunk to avoid GPU memory overflow
     # append the CPU embeddings to a python list and concatenate all chunks to form the final candidate embedding matrix
     for start in tqdm(range(0, len(ids), 512), desc="  Building index", leave=False):
         batch_ids   = ids[start : start + 512]
@@ -361,7 +361,7 @@ def main():
         # Reseed the sampler each epoch so batch composition varies (mirrors shuffle=True)
         train_batch_sampler.set_epoch(epoch)
 
-        # Build frozen index before training — used only for evaluation
+        # Build frozen index before training — used only for evaluationR
         candidate_embs = build_candidate_index(
             paper_tower, all_paper_feats, all_candidate_ids, device)
 
