@@ -128,18 +128,44 @@ def build_candidate_index(paper_tower, all_paper_feats, candidate_ids, device):
 @torch.no_grad()
 def evaluate(context_tower, loader, candidate_embs, candidate_ids, device):
     """
-    citations sharing the same context_group_id
-    (i.e. citation_type == "multiple") are treated as ONE evaluation unit.
-    Recall@K becomes a fractional per-group hit rate, MRR/nDCG are averaged
-    within each group, and n_queries counts GROUPS, not raw citation rows.
+    Citations sharing the same context_group_id (citation_type == "multiple")
+    are treated as ONE evaluation unit (= one s in S_{P_c}).
+    Recall@K = average over groups of (#hits@K) / min(|cit(G(s))|, K),
+    matching R@n = sum_s sum_{p in Pi_n(s)} X(p, cit(G(s))) / sum_s min(|cit(G(s))|, n),
+    macro-averaged per group instead of micro-averaged globally.
+    MRR/nDCG are averaged within each group first, then across groups.
+    n_queries counts GROUPS, not raw citation rows.
+
+    Example: a context group with 3 true citations ranked [1, 4, 9]
+    contributes Recall@1 = 1/1 = 1.0 (only 1 slot possible, capped),
+    Recall@5 = 2/3 (2 hits out of 3 possible, since 3 <= 5).
+    This group counts as ONE query, same weight as a group with only
+    1 true citation -- that's what "macro-averaged" means here.
     """
     context_tower.eval()
+
+    # Move the full candidate pool embeddings to GPU/CPU device once,
+    # so we don't repeatedly transfer them inside the loop.
     cand_dev = candidate_embs.to(device)
+
+    # Map each candidate paper's global ID -> its row index in cand_dev.
+    # Needed because "cited_paper_id" in the batch is a global ID, but
+    # sims[i] is indexed positionally (0..num_candidates-1).
     global_to_pos = {gid: pos for pos, gid in enumerate(candidate_ids.tolist())}
 
+    # Standard cutoffs to report Recall at.
     k_values = [1, 5, 10, 20]
-    all_ranks = []
+
+    # group_ranks[group_id] = list of ranks (one per true citation) for
+    # that context. E.g. group_ranks[59328] = [1, 4, 9] means this context
+    # has 3 true cited papers, found at ranks 1, 4, and 9 in the candidate
+    # ranking. Rows with citation_type == "single" just end up as groups
+    # of size 1.
     group_ranks = defaultdict(list)
+
+    # Counts cited papers that don't exist in the candidate pool at all
+    # (e.g. external papers not indexed) -- these are skipped, not
+    # counted as misses, so they don't unfairly punish the model.
     n_skipped = 0
 
     with torch.no_grad():
@@ -149,33 +175,94 @@ def evaluate(context_tower, loader, candidate_embs, candidate_ids, device):
             cited_ids = batch["cited_paper_id"].tolist()
             group_ids = batch["context_group_id"].tolist()
 
+            # Encode this batch of context strings into embeddings.
+            # NOTE: for "multiple" citation type, several rows in the
+            # batch will share the SAME context text (and same
+            # input_ids), because the same sentence cites several
+            # papers. Their ctx_emb (and therefore sims) will be
+            # IDENTICAL -- only the target paper (cited_id) differs
+            # per row. This is why identical-context rows can produce
+            # tied similarity scores / tied ranks (see chat discussion
+            # on why rank ties like [2, 2] can occur).
             ctx_emb = context_tower(input_ids, attention_mask)
+
+            # Similarity of each context embedding against every
+            # candidate paper embedding -> shape (batch_size, num_candidates).
             sims = torch.matmul(ctx_emb, cand_dev.T)
 
             for i, cited_id in enumerate(cited_ids):
                 if cited_id not in global_to_pos:
+                    # True citation isn't in our candidate pool
+                    # (e.g. filtered out / external paper) -- can't
+                    # evaluate rank for it, so skip.
                     n_skipped += 1
                     continue
+
+                # Position of the true cited paper within the
+                # candidate similarity vector for this row.
                 pos = global_to_pos[cited_id]
+
+                # Rank = 1 + (number of candidates strictly more similar
+                # than the true paper). Strict ">" means tied scores do
+                # NOT push each other down -- this is why two true
+                # citations sharing an identical context embedding can
+                # end up with the same rank (see earlier discussion).
                 rank = int((sims[i] > sims[i][pos]).sum().item()) + 1
-                all_ranks.append(rank)
+
+                # Store this rank under its context group, so all true
+                # citations belonging to the same context/sentence get
+                # aggregated together as ONE evaluation unit.
                 group_ranks[group_ids[i]].append(rank)
 
     if not group_ranks:
+        # Nothing was evaluable this round (e.g. entire candidate pool
+        # mismatched) -- avoid crashing on division by zero below.
         print("  [WARN] No valid queries.")
         return {}
 
+    # Running sums, one per k, to be macro-averaged over groups at the end.
     recall_hits = {k: 0.0 for k in k_values}
     mrr_sum, ndcg_sum, n_queries = 0.0, 0.0, 0
 
     for group_id, ranks in group_ranks.items():
+        # n_papers = how many true citations this context/group has.
+        # For citation_type == "single" this is 1; for "multiple" it's
+        # however many papers were co-cited in that sentence.
         n_papers = len(ranks)
+
         for k in k_values:
-            recall_hits[k] += sum(1 for r in ranks if r <= k) / n_papers
+            # Cap the denominator at k: you can never get more than k
+            # hits out of k slots, even if the group has more true
+            # citations than k. This matches min(|cit(G(s))|, n) from
+            # the whiteboard formula -- WITHOUT this cap, groups with
+            # many true citations would have their recall artificially
+            # deflated (e.g. 1 hit / 5 true citations = 0.2 instead of
+            # the correct 1 hit / 1 possible slot = 1.0 at k=1).
+            denom = min(n_papers, k)
+
+            # Count how many of this group's true citations landed
+            # within the top-k.
+            hits = sum(1 for r in ranks if r <= k)
+
+            # Add this group's Recall@k contribution. Divided by
+            # n_queries later to get the macro-average across groups.
+            recall_hits[k] += hits / denom
+
+        # MRR: average of 1/rank across this group's true citations,
+        # then this per-group average gets summed here and divided by
+        # n_queries below (i.e. groups are NOT weighted by their size).
         mrr_sum += sum(1.0 / r for r in ranks) / n_papers
+
+        # nDCG@10 style discount: average of 1/log2(rank+1) across this
+        # group's true citations, same within-group-then-across-groups
+        # averaging as MRR.
         ndcg_sum += sum(1.0 / math.log2(r + 1) for r in ranks) / n_papers
+
+        # Each group (not each raw citation row) counts as ONE query.
         n_queries += 1
 
+    # Final macro-averages: divide every accumulated sum by the number
+    # of GROUPS (context units), not the number of raw citation rows.
     metrics = {f"Recall@{k}": recall_hits[k] / n_queries for k in k_values}
     metrics.update({"MRR": mrr_sum / n_queries, "nDCG@10": ndcg_sum / n_queries,
                     "n_queries": n_queries, "n_skipped": n_skipped})
