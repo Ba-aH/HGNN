@@ -37,6 +37,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+from collections import defaultdict
 
 # ---------------------------------------------------------------------------
 # Path setup
@@ -126,60 +127,56 @@ def build_candidate_index(paper_tower, all_paper_feats, candidate_ids, device):
 # ---------------------------------------------------------------------------
 @torch.no_grad()
 def evaluate(context_tower, loader, candidate_embs, candidate_ids, device):
+    """
+    citations sharing the same context_group_id
+    (i.e. citation_type == "multiple") are treated as ONE evaluation unit.
+    Recall@K becomes a fractional per-group hit rate, MRR/nDCG are averaged
+    within each group, and n_queries counts GROUPS, not raw citation rows.
+    """
     context_tower.eval()
-
-    # Move the frozen 26K candidate embeddings to GPU for fast dot product computation
     cand_dev = candidate_embs.to(device)
-
-    # Map each global paper integer ID → its position in the candidate matrix
-    # e.g. {paper_id_5: 0, paper_id_12: 1, ...} so we can look up the ground truth rank instantly
     global_to_pos = {gid: pos for pos, gid in enumerate(candidate_ids.tolist())}
 
-    recall_hits = {k: 0 for k in [1, 5, 10, 20]}
-    mrr_sum, ndcg_sum, n_queries, n_skipped = 0.0, 0.0, 0, 0
+    k_values = [1, 5, 10, 20]
+    all_ranks = []
+    group_ranks = defaultdict(list)
+    n_skipped = 0
 
-    for batch in tqdm(loader, desc="  Evaluating", leave=False):
+    with torch.no_grad():
+        for batch in tqdm(loader, desc="  Evaluating", leave=False):
+            input_ids = batch["input_ids"].to(device)
+            attention_mask = batch["attention_mask"].to(device)
+            cited_ids = batch["cited_paper_id"].tolist()
+            group_ids = batch["context_group_id"].tolist()
 
-        # Encode the batch of citation contexts → [B, embed_dim]
-        ctx_emb = context_tower(batch["input_ids"].to(device),
-                                batch["attention_mask"].to(device))
+            ctx_emb = context_tower(input_ids, attention_mask)
+            sims = torch.matmul(ctx_emb, cand_dev.T)
 
-        # Compute similarity between every context and every candidate paper → [B, N_candidates]
-        # Since both embeddings are L2-normalised, matmul = cosine similarity
-        sims = torch.matmul(ctx_emb, cand_dev.T)
+            for i, cited_id in enumerate(cited_ids):
+                if cited_id not in global_to_pos:
+                    n_skipped += 1
+                    continue
+                pos = global_to_pos[cited_id]
+                rank = int((sims[i] > sims[i][pos]).sum().item()) + 1
+                all_ranks.append(rank)
+                group_ranks[group_ids[i]].append(rank)
 
-        for i, cited_id in enumerate(batch["cited_paper_id"].tolist()):
-
-            # Skip queries whose ground truth paper is not in the candidate pool
-            if cited_id not in global_to_pos:
-                n_skipped += 1
-                continue
-
-            pos = global_to_pos[cited_id]
-
-            # Rank = number of candidates with higher similarity than the ground truth + 1
-            # e.g. rank=1 means the correct paper was the top result
-            rank = int((sims[i] > sims[i][pos]).sum().item()) + 1
-
-            # Recall@K: did the correct paper appear in the top K results?
-            for k in [1, 5, 10, 20]:
-                if rank <= k:
-                    recall_hits[k] += 1
-
-            # MRR: mean reciprocal rank — rewards finding the correct paper early
-            mrr_sum += 1.0 / rank
-
-            # nDCG@10: discounted cumulative gain — logarithmic penalty for lower ranks
-            ndcg_sum += 1.0 / math.log2(rank + 1)
-
-            n_queries += 1
-
-    if n_queries == 0:
+    if not group_ranks:
         print("  [WARN] No valid queries.")
         return {}
 
-    # Normalise all accumulated scores by total number of valid queries
-    metrics = {f"Recall@{k}": recall_hits[k] / n_queries for k in [1, 5, 10, 20]}
+    recall_hits = {k: 0.0 for k in k_values}
+    mrr_sum, ndcg_sum, n_queries = 0.0, 0.0, 0
+
+    for group_id, ranks in group_ranks.items():
+        n_papers = len(ranks)
+        for k in k_values:
+            recall_hits[k] += sum(1 for r in ranks if r <= k) / n_papers
+        mrr_sum += sum(1.0 / r for r in ranks) / n_papers
+        ndcg_sum += sum(1.0 / math.log2(r + 1) for r in ranks) / n_papers
+        n_queries += 1
+
+    metrics = {f"Recall@{k}": recall_hits[k] / n_queries for k in k_values}
     metrics.update({"MRR": mrr_sum / n_queries, "nDCG@10": ndcg_sum / n_queries,
                     "n_queries": n_queries, "n_skipped": n_skipped})
     return metrics
@@ -410,13 +407,6 @@ def main():
 
             test_metrics = evaluate(context_tower, test_loader, post_train_candidate_embs,
                                     all_candidate_ids, device)
-            print(f"  [test @ epoch {epoch}]"
-                  f" R@1={test_metrics.get('Recall@1',0):.4f}"
-                  f" R@10={test_metrics.get('Recall@10',0):.4f}"
-                  f" MRR={test_metrics.get('MRR',0):.4f}"
-                  f" nDCG@10={test_metrics.get('nDCG@10',0):.4f}"
-                  f" (n={test_metrics.get('n_queries',0):,})")
-
             test_history.append({"epoch": epoch, **test_metrics})
 
             # Write after every eval, not just at the end, so the curve survives
