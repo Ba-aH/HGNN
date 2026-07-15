@@ -20,7 +20,7 @@
   "feat_keys": [
     "P",
     "PP",
-    "PPCon"
+    "PCCon"
   ],
   "num_heads": 1,        "note13": "number of attention heads in the cross-metapath self-attention layer inside PaperTower. 1 means no multi-head attention.",
   "embed_dim": 768,     "note12": "the size of the final output vector from both towers — kept fixed at 768 across the sweep so it always matches ContextTower.",
