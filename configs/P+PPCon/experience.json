@@ -15,7 +15,7 @@
   "seed": 42,           "note10": "fixed random seed generator for reproducibility",
   "gpu": 0,             "note11": "index of the GPU to use for training. 0 means the first GPU in the system.",
   "eval_every": 1,
-  "experiment_name": "exp_P-PP-PPCon_MLP_hidden900",
+  "experiment_name": "exp_P-PP-PPCon_MLP_hidden500",
 
   "feat_keys": [
     "P",
@@ -23,8 +23,8 @@
   ],
   "num_heads": 1,        "note13": "number of attention heads in the cross-metapath self-attention layer inside PaperTower. 1 means no multi-head attention.",
   "embed_dim": 768,     "note12": "the size of the final output vector from both towers — kept fixed at 768 across the sweep so it always matches ContextTower.",
-  "hidden": 500,        "note2": "hidden dim of LinearPerMetapath and the Transformer (use_mlp=True routes features through hidden=900 before fusion — expands past nfeat=768).",
-  "use_mlp": true,       "note14": "runs metapath features through LinearPerMetapath (nfeat=768 -> hidden=900) before the Transformer.",
+  "hidden": 500,        "note2": "hidden dim of LinearPerMetapath and the Transformer (use_mlp=True routes features through hidden=500 before fusion — expands past nfeat=768).",
+  "use_mlp": true,       "note14": "runs metapath features through LinearPerMetapath (nfeat=768 -> hidden=500) before the Transformer.",
   "att_drop": 0.1,      "note15": "dropout applied to attention weights inside the Transformer (cross-metapath fusion), to prevent overfitting on attention scores.",
   "act": "none",  "note16": "activation applied to attention scores before softmax inside the Transformer. Options: sigmoid, relu, leaky_relu, none.",
   "residual": true,     "note17": "adds a skip connection from mean(inputs) -> hidden, added to the fc_after_concat output before the final projection.",
