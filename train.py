@@ -83,8 +83,8 @@ def infonce_loss(ctx_emb, paper_emb, temperature):
     logits = torch.matmul(ctx_emb, paper_emb.T) / temperature
     labels = torch.arange(logits.size(0), device=logits.device)
 
-    loss_c2p = F.cross_entropy(logits,   labels)  # context → paper
-    loss_p2c = F.cross_entropy(logits.T, labels)  # paper → context
+    loss_c2p = F.cross_entropy(logits,   labels)  # context → paper: Makes each context pull its correct paper closer than other papers. Good for "given context, rank papers"
+    loss_p2c = F.cross_entropy(logits.T, labels)  # paper → context: Makes each paper pull its correct context closer than other contexts. This forces paper embeddings to spread out and stay distinct.
 
     return (loss_c2p + loss_p2c) / 2.0
 
@@ -156,6 +156,7 @@ def evaluate(context_tower, loader, candidate_embs, candidate_ids, device):
     # Standard cutoffs to report Recall at.
     k_values = [1, 5, 10, 20]
 
+    # automatically create a list for each new group_id, so we can append ranks to it without pre-initializing
     # group_ranks[group_id] = list of ranks (one per true citation) for
     # that context. E.g. group_ranks[59328] = [1, 4, 9] means this context
     # has 3 true cited papers, found at ranks 1, 4, and 9 in the candidate
@@ -195,6 +196,7 @@ def evaluate(context_tower, loader, candidate_embs, candidate_ids, device):
                     # True citation isn't in our candidate pool
                     # (e.g. filtered out / external paper) -- can't
                     # evaluate rank for it, so skip.
+                    # sanity check: this shouldn't happen
                     n_skipped += 1
                     continue
 
@@ -206,19 +208,13 @@ def evaluate(context_tower, loader, candidate_embs, candidate_ids, device):
                 # than the true paper). Strict ">" means tied scores do
                 # NOT push each other down -- this is why two true
                 # citations sharing an identical context embedding can
-                # end up with the same rank (see earlier discussion).
+                # end up with the same rank .
                 rank = int((sims[i] > sims[i][pos]).sum().item()) + 1
 
                 # Store this rank under its context group, so all true
                 # citations belonging to the same context/sentence get
                 # aggregated together as ONE evaluation unit.
                 group_ranks[group_ids[i]].append(rank)
-
-    if not group_ranks:
-        # Nothing was evaluable this round (e.g. entire candidate pool
-        # mismatched) -- avoid crashing on division by zero below.
-        print("  [WARN] No valid queries.")
-        return {}
 
     # Running sums, one per k, to be macro-averaged over groups at the end.
     recall_hits = {k: 0.0 for k in k_values}
@@ -233,8 +229,8 @@ def evaluate(context_tower, loader, candidate_embs, candidate_ids, device):
         for k in k_values:
             # Cap the denominator at k: you can never get more than k
             # hits out of k slots, even if the group has more true
-            # citations than k. This matches min(|cit(G(s))|, n) from
-            # the whiteboard formula -- WITHOUT this cap, groups with
+            # citations than k. This matches min(|cit(G(s))|, n) 
+            # WITHOUT this cap, groups with
             # many true citations would have their recall artificially
             # deflated (e.g. 1 hit / 5 true citations = 0.2 instead of
             # the correct 1 hit / 1 possible slot = 1.0 at k=1).
@@ -242,7 +238,10 @@ def evaluate(context_tower, loader, candidate_embs, candidate_ids, device):
 
             # Count how many of this group's true citations landed
             # within the top-k.
-            hits = sum(1 for r in ranks if r <= k)
+            hits = 0
+            for r in ranks:
+                if r <= k:
+                    hits = hits + 1
 
             # Add this group's Recall@k contribution. Divided by
             # n_queries later to get the macro-average across groups.
