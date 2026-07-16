@@ -130,11 +130,6 @@ def evaluate(context_tower, loader, candidate_embs, candidate_ids, device):
     """
     Citations sharing the same context_group_id (citation_type == "multiple")
     are treated as ONE evaluation unit (= one s in S_{P_c}).
-    Recall@K = average over groups of (#hits@K) / min(|cit(G(s))|, K),
-    matching R@n = sum_s sum_{p in Pi_n(s)} X(p, cit(G(s))) / sum_s min(|cit(G(s))|, n),
-    macro-averaged per group instead of micro-averaged globally.
-    MRR/nDCG are averaged within each group first, then across groups.
-    n_queries counts GROUPS, not raw citation rows.
 
     Example: a context group with 3 true citations ranked [1, 4, 9]
     contributes Recall@1 = 1/1 = 1.0 (only 1 slot possible, capped),
@@ -204,12 +199,25 @@ def evaluate(context_tower, loader, candidate_embs, candidate_ids, device):
                 # candidate similarity vector for this row.
                 pos = global_to_pos[cited_id]
 
-                # Rank = 1 + (number of candidates strictly more similar
-                # than the true paper). Strict ">" means tied scores do
-                # NOT push each other down -- this is why two true
-                # citations sharing an identical context embedding can
-                # end up with the same rank .
-                rank = int((sims[i] > sims[i][pos]).sum().item()) + 1
+                # --- Step 1: Compare true paper's score against every candidate's score ---
+                # sims[i] = similarity scores of context i against ALL candidate papers
+                # sims[i][pos] = similarity score of the TRUE cited paper
+                true_score = sims[i][pos]
+
+                # Boolean vector: True wherever a candidate scored STRICTLY higher
+                # than the true paper (ties do NOT count as "higher")
+                beats_true_paper = sims[i] > true_score
+
+                # --- Step 2: Count how many candidates scored strictly higher ---
+                # This tells us how many papers would be ranked ABOVE the true paper
+                num_candidates_ahead = beats_true_paper.sum()   # still a tensor
+                num_candidates_ahead = num_candidates_ahead.item()  # convert to plain Python number
+                num_candidates_ahead = int(num_candidates_ahead)    # make sure it's an int
+
+                # --- Step 3: Convert count into a 1-indexed rank ---
+                # If 0 candidates beat it -> it's rank 1 (best possible)
+                # If 3 candidates beat it -> it's rank 4
+                rank = num_candidates_ahead + 1
 
                 # Store this rank under its context group, so all true
                 # citations belonging to the same context/sentence get
@@ -221,9 +229,18 @@ def evaluate(context_tower, loader, candidate_embs, candidate_ids, device):
     mrr_sum, ndcg_sum, n_queries = 0.0, 0.0, 0
 
     for group_id, ranks in group_ranks.items():
-        # n_papers = how many true citations this context/group has.
-        # For citation_type == "single" this is 1; for "multiple" it's
-        # however many papers were co-cited in that sentence.
+        # ranks holds one entry per TRUE citation belonging to this group
+        # (appended earlier via group_ranks[group_id].append(rank)).
+        #
+        # - single-citation context  -> ranks = [rank1]              -> len = 1
+        # - multi-citation context   -> ranks = [rank1, rank2, rank3] -> len = 3
+        #   (one rank per co-cited paper in that sentence, e.g. "[12, 13, 14]")
+        #
+        # So n_papers is NOT the number of candidates compared against --
+        # it's the number of ground-truth correct papers for this one query/group.
+        # needed below to correctly cap the Recall@K denominator via
+        # min(n_papers, k) -- e.g. a group with 3 true citations shouldn't be
+        # penalized for only having 1 possible hit slot when k=1.
         n_papers = len(ranks)
 
         for k in k_values:
