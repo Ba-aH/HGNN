@@ -19,6 +19,8 @@ configs/P+PP/MLP_768/**/
 configs/P+PP/MLP_900/**/
 configs/P+PP/MLP_250/**/
 configs/P/**/
+configs/PP/**/
+configs/PPCon/**/
 configs/P+PP+PPCon/**/
 configs/P+PPCon/**/
 myoutfile
