@@ -19,7 +19,7 @@ Evaluation metrics: Recall@K (K=1,5,10,20), MRR, nDCG@10
 Usage:
     python train.py --config configs/P+PP/no_MLP/experience.json
     
-    nohup python train.py --config configs/P+PPCon/experience.json >myoutfile 2>&1 &
+    nohup python train.py --config configs/P/experience.json >myoutfile 2>&1 &
 """
 
 import os
