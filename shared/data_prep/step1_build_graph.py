@@ -13,9 +13,9 @@ Saves:
   node_index.json       {uri: int_id}
   corpus_ids.pt         LongTensor of corpus paper int IDs
   external_ids.pt       LongTensor of external paper int IDs
-  adj_PP.pt             sparse COO FloatTensor [N_papers, N_papers]
-  adj_CP_citing.pt      sparse COO FloatTensor [N_citations, N_papers]
-  adj_CP_cited.pt       sparse COO FloatTensor [N_citations, N_papers]
+  adj_PP.pt             sparse COO FloatTensor [N_papers, N_papers]: matrix to link paper with cited paper
+  adj_CP_citing.pt      sparse COO FloatTensor [N_citations, N_papers]: matrix to link context with citing paper
+  adj_CP_cited.pt       sparse COO FloatTensor [N_citations, N_papers]: matrix to link context with cited paper
 """
 
 import json
@@ -65,6 +65,7 @@ for s, _, _ in g.triples((None, CITO.isCitedBy, None)):
     uri = str(s)
     if uri.startswith(PAPER_PREFIX):
         all_paper_uris.add(uri)
+        
 for _, _, o in g.triples((None, CITO.isCitedBy, None)):
     uri = str(o)
     if uri.startswith(PAPER_PREFIX):
