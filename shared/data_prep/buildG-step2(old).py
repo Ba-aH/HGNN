@@ -1,16 +1,6 @@
 """
-step2_encode_corpus_papers_sparql.py
-─────────────────────────────────────
-
-
-One SPARQL query is run against the graph:
-  - ?s dcterms:title ?o → gives each paper's title text
-
-The result rows are used to build the `titles` lookup dict (URI → title
-text), which is then merged with each paper's abstract before SciBERT
-encoding. Everything else (abstract loading, encoding, saving) is
-unchanged. Output is identical in content and format.
-
+step2_encode_corpus_papers.py
+─────────────────────────────
 Reads:
   abstracts.json   {paper_uri: abstract_text}
   merged-kg.ttl    (dcterms:title per paper, used for the title text)
@@ -32,7 +22,7 @@ import json
 from pathlib import Path
 
 import torch
-from rdflib import Graph, Namespace
+from rdflib import Graph, Namespace, URIRef
 from transformers import AutoTokenizer, AutoModel
 
 DCTERMS = Namespace("http://purl.org/dc/terms/")
@@ -44,10 +34,6 @@ MODEL_NAME     = "allenai/scibert_scivocab_uncased"
 BATCH_SIZE     = 32
 MAX_LENGTH     = 512 #SciBERT's max input length is 512 tokens cap
 DEVICE         = "cuda" if torch.cuda.is_available() else "cpu"
-
-SPARQL_PREFIXES = """
-PREFIX dcterms: <http://purl.org/dc/terms/>
-"""
 
 # ── Load index structures ─────────────────────────────────────────────────────
 print("Loading index …")
@@ -70,17 +56,13 @@ with open(ABSTRACTS_FILE) as f:
     abstracts: dict[str, str] = json.load(f)
 print(f"  Abstract entries: {len(abstracts):,}")
 
-# ── Load titles (dcterms:title) from the KG via SPARQL ────────────────────────
+# ── Load titles (dcterms:title) from the KG ───────────────────────────────────
 print(f"Loading titles from {KG_FILE} …")
 g = Graph()
 g.parse(KG_FILE, format="turtle")
 
-q_title = SPARQL_PREFIXES + """
-SELECT ?s ?o WHERE { ?s dcterms:title ?o . }
-"""
-
 titles: dict[str, str] = {}
-for s, o in g.query(q_title):
+for s, _, o in g.triples((None, DCTERMS.title, None)):
     uri = str(s)
     text = str(o).strip()
     if text:

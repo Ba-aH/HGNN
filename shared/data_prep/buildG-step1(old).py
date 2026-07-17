@@ -1,40 +1,29 @@
 """
-step1_build_graph_sparql.py
-────────────────────────────
-Same as step1_build_graph.py, but every graph access is done via SPARQL
-queries (g.query(...)) instead of rdflib's triples() pattern matching.
-
-Four SPARQL queries are run against the graph:
-  - ?s cito:cites ?o           → gives corpus/paper URIs and adj_PP edges
-  - ?s cito:isCitedBy ?o       → gives external paper URIs
-  - ?s cito:hasCitingEntity ?o → gives citation node URIs and adj_CP_citing edges
-  - ?s cito:hasCitedEntity ?o  → gives citation node URIs and adj_CP_cited edges
-
-
+step1_build_graph.py
+────────────────────
 Reads merged.ttl and extracts:
   - All paper URIs → integer IDs 0..N-1
   - Corpus papers  (have cito:cites outgoing)
   - External papers (only cito:isCitedBy, no outgoing cites)
   - adj_PP        : corpus→any paper  (paper cites paper)
-  - adj_CP_citing : citation→corpus paper (hasCitingEntity) link each citation context node to the paper that contains it
-  - adj_CP_cited  : citation→any paper   (hasCitedEntity) link each citation context node to the paper(s) it points to
-
-Purpose: turn raw graph structure into propagation paths so step 4 can compute metapath features (feat_PP, feat_PCP, feat_PCCon) for PaperTower
+  - adj_CP_citing : citation→corpus paper (hasCitingEntity)
+  - adj_CP_cited  : citation→any paper   (hasCitedEntity)
 
 Saves:
   node_index.json       {uri: int_id}
   corpus_ids.pt         LongTensor of corpus paper int IDs
   external_ids.pt       LongTensor of external paper int IDs
-  adj_PP.pt             sparse COO FloatTensor [N_papers, N_papers]
-  adj_CP_citing.pt      sparse COO FloatTensor [N_citations, N_papers]
-  adj_CP_cited.pt       sparse COO FloatTensor [N_citations, N_papers]
+  adj_PP.pt             sparse COO FloatTensor [N_papers, N_papers]: matrix to link paper with cited paper
+  adj_CP_citing.pt      sparse COO FloatTensor [N_citations, N_papers]: matrix to link context with citing paper
+  adj_CP_cited.pt       sparse COO FloatTensor [N_citations, N_papers]: matrix to link context with cited paper
 """
 
 import json
 from pathlib import Path
 
 import torch
-from rdflib import Graph, Namespace
+from rdflib import Graph, Namespace, URIRef
+from rdflib.namespace import RDF
 
 # ── Namespaces ────────────────────────────────────────────────────────────────
 CITO    = Namespace("http://purl.org/spar/cito/")
@@ -48,15 +37,6 @@ CITATION_PREFIX = "https://citekg.org/resource/citation/"
 
 OUT_DIR = Path(".")
 
-# Namespace prefixes shared by every SPARQL query below
-SPARQL_PREFIXES = """
-PREFIX cito: <http://purl.org/spar/cito/>
-PREFIX c4o: <http://purl.org/spar/c4o/>
-PREFIX citekg: <https://citekg.org/ontology/>
-PREFIX bibo: <http://purl.org/ontology/bibo/>
-PREFIX dcterms: <http://purl.org/dc/terms/>
-"""
-
 # ── Load graph ────────────────────────────────────────────────────────────────
 print("Loading merged-kg.ttl …")
 g = Graph()
@@ -67,34 +47,29 @@ print(f"  {len(g):,} triples loaded")
 print("Collecting paper URIs …")
 
 # Corpus papers: subjects of cito:cites triples
-q_cites = SPARQL_PREFIXES + """
-SELECT ?s ?o WHERE { ?s cito:cites ?o . }
-"""
-cites_rows = list(g.query(q_cites))  # reused below for adj_PP too
-
 corpus_uris: set[str] = set()
-for s, o in cites_rows:
+for s, _, _ in g.triples((None, CITO.cites, None)):
     uri = str(s)
     if uri.startswith(PAPER_PREFIX):
         corpus_uris.add(uri)
 
 # All paper URIs (corpus + external) — gather from both sides of cito:cites
 all_paper_uris: set[str] = set(corpus_uris)
-for s, o in cites_rows:
+for _, _, o in g.triples((None, CITO.cites, None)):
     uri = str(o)
     if uri.startswith(PAPER_PREFIX):
         all_paper_uris.add(uri)
 
 # Also catch external papers that appear only in cito:isCitedBy
-q_is_cited_by = SPARQL_PREFIXES + """
-SELECT ?s ?o WHERE { ?s cito:isCitedBy ?o . }
-"""
-for s, o in g.query(q_is_cited_by):
-    s_uri, o_uri = str(s), str(o)
-    if s_uri.startswith(PAPER_PREFIX):
-        all_paper_uris.add(s_uri)
-    if o_uri.startswith(PAPER_PREFIX):
-        all_paper_uris.add(o_uri)
+for s, _, _ in g.triples((None, CITO.isCitedBy, None)):
+    uri = str(s)
+    if uri.startswith(PAPER_PREFIX):
+        all_paper_uris.add(uri)
+        
+for _, _, o in g.triples((None, CITO.isCitedBy, None)):
+    uri = str(o)
+    if uri.startswith(PAPER_PREFIX):
+        all_paper_uris.add(uri)
 
 external_uris: set[str] = all_paper_uris - corpus_uris
 
@@ -106,21 +81,11 @@ print(f"  Total papers   : {len(all_paper_uris):,}")
 print("Collecting citation node URIs …")
 citation_uris: set[str] = set()
 
-q_has_citing_entity = SPARQL_PREFIXES + """
-SELECT ?s ?o WHERE { ?s cito:hasCitingEntity ?o . }
-"""
-has_citing_entity_rows = list(g.query(q_has_citing_entity))  # reused below
-
-q_has_cited_entity = SPARQL_PREFIXES + """
-SELECT ?s ?o WHERE { ?s cito:hasCitedEntity ?o . }
-"""
-has_cited_entity_rows = list(g.query(q_has_cited_entity))  # reused below
-
-for s, o in has_citing_entity_rows:
+for s, _, _ in g.triples((None, CITO.hasCitingEntity, None)):
     uri = str(s)
     if uri.startswith(CITATION_PREFIX):
         citation_uris.add(uri)
-for s, o in has_cited_entity_rows:
+for s, _, _ in g.triples((None, CITO.hasCitedEntity, None)):
     uri = str(s)
     if uri.startswith(CITATION_PREFIX):
         citation_uris.add(uri)
@@ -141,7 +106,7 @@ N_citations = len(citation_list)
 # ── adj_PP : paper → cited paper (corpus→any) ────────────────────────────────
 print("Building adj_PP …")
 pp_rows, pp_cols = [], []
-for s, o in cites_rows:
+for s, _, o in g.triples((None, CITO.cites, None)):
     s_uri, o_uri = str(s), str(o)
     if s_uri in paper_id and o_uri in paper_id:
         pp_rows.append(paper_id[s_uri])
@@ -157,8 +122,8 @@ print(f"  adj_PP : {adj_PP._nnz():,} edges")
 # ── adj_CP_citing : citation → citing paper ───────────────────────────────────
 print("Building adj_CP_citing …")
 cp_citing_rows, cp_citing_cols = [], []
-for c_uri_raw, p_uri_raw in has_citing_entity_rows:
-    c_uri, p_uri = str(c_uri_raw), str(p_uri_raw)
+for s, _, o in g.triples((None, CITO.hasCitingEntity, None)):
+    c_uri, p_uri = str(s), str(o)
     if c_uri in citation_id and p_uri in paper_id:
         cp_citing_rows.append(citation_id[c_uri])
         cp_citing_cols.append(paper_id[p_uri])
@@ -173,8 +138,8 @@ print(f"  adj_CP_citing : {adj_CP_citing._nnz():,} edges")
 # ── adj_CP_cited : citation → cited paper ────────────────────────────────────
 print("Building adj_CP_cited …")
 cp_cited_rows, cp_cited_cols = [], []
-for c_uri_raw, p_uri_raw in has_cited_entity_rows:
-    c_uri, p_uri = str(c_uri_raw), str(p_uri_raw)
+for s, _, o in g.triples((None, CITO.hasCitedEntity, None)):
+    c_uri, p_uri = str(s), str(o)
     if c_uri in citation_id and p_uri in paper_id:
         cp_cited_rows.append(citation_id[c_uri])
         cp_cited_cols.append(paper_id[p_uri])

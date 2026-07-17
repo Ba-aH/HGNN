@@ -143,10 +143,28 @@ def evaluate(context_tower, loader, candidate_embs, candidate_ids, device):
     # so we don't repeatedly transfer them inside the loop.
     cand_dev = candidate_embs.to(device)
 
+    # --- Zero-vector filtering -------------------------------------------
+    # Papers whose PaperTower embedding is exactly all-zero (e.g. external
+    # papers under a PP-only config, which have no outgoing adj_PP edges)
+    # all get identical similarity scores against every query. Since rank
+    # is "1 + count of candidates strictly ahead", these tied zero-vector
+    # papers can NEVER outrank anything -- they're invisible to the rank
+    # calculation but still silently occupy pool slots. Left in, they let
+    # a zero-vector TRUE paper win rank=1 "for free". So we drop them from
+    # the candidate pool before ranking anything.
+    nonzero_mask = cand_dev.abs().sum(dim=1) != 0
+    n_zero_candidates = (~nonzero_mask).sum().item()
+    cand_dev = cand_dev[nonzero_mask]
+
     # Map each candidate paper's global ID -> its row index in cand_dev.
     # Needed because "cited_paper_id" in the batch is a global ID, but
     # sims[i] is indexed positionally (0..num_candidates-1).
-    global_to_pos = {gid: pos for pos, gid in enumerate(candidate_ids.tolist())}
+
+    # FILTERED cand_dev. Global IDs whose embedding was zero are simply
+    # absent from this dict now, so any cited_id lookup against it will
+    # fail gracefully.
+    kept_ids = [gid for gid, keep in zip(candidate_ids.tolist(), nonzero_mask.tolist()) if keep]
+    global_to_pos = {gid: pos for pos, gid in enumerate(kept_ids)}
 
     # Standard cutoffs to report Recall at.
     k_values = [1, 5, 10, 20]
@@ -281,7 +299,8 @@ def evaluate(context_tower, loader, candidate_embs, candidate_ids, device):
     # of GROUPS (context units), not the number of raw citation rows.
     metrics = {f"Recall@{k}": recall_hits[k] / n_queries for k in k_values}
     metrics.update({"MRR": mrr_sum / n_queries, "nDCG@10": ndcg_sum / n_queries,
-                    "n_queries": n_queries, "n_skipped": n_skipped})
+                "n_queries": n_queries, "n_skipped": n_skipped,
+                "n_zero_candidates_dropped": n_zero_candidates})
     return metrics
 
 
