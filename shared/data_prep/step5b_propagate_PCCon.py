@@ -12,6 +12,15 @@ Propagation (identical pattern to step4):
 
 feat_PCCon[i] = mean SciBERT embedding of all contexts that cite paper i
 
+NOTE (leakage fix, no code change needed here): this script has no logic
+change because it just propagates whatever is in feat_C.pt. The leakage fix
+lives entirely in step5a, which now only encodes TRAIN-split citation
+contexts into feat_C.pt. As long as step5a was regenerated with the
+split_uris.json filter before this script runs, feat_PCCon.pt here is
+automatically train-only too. This script includes an extra sanity print
+comparing non-zero rows to feat_C.pt's non-zero rows so a stale/unfiltered
+feat_C.pt is easy to catch.
+
 Saves:
   feat_PCCon.pt    FloatTensor [N_total, 768]
 """
@@ -34,6 +43,11 @@ adj_CP_cited = torch.load(OUT_DIR / "adj_CP_cited.pt").coalesce()  # [N_cit, N_p
 
 print(f"  feat_C        {tuple(feat_C.shape)}")
 print(f"  adj_CP_cited  {tuple(adj_CP_cited.shape)}  nnz={adj_CP_cited._nnz():,}")
+
+feat_C_nonzero = (feat_C.abs().sum(1) > 0).sum().item()
+print(f"  feat_C non-zero rows: {feat_C_nonzero:,} / {feat_C.shape[0]:,} "
+      f"(sanity check — should reflect TRAIN-only citations if step5a was "
+      f"correctly filtered against split_uris.json)")
 
 # ── row_normalise (copied from step4) ────────────────────────────────────────
 def row_normalise(sp: torch.Tensor) -> torch.Tensor:

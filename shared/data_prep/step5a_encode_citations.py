@@ -4,9 +4,16 @@ step5a_encode_citations.py
 Reads:
   all_contexts.json    [{context, cited_uri, citing_uri, citing_idx}, ...]
   node_index.json      (citation_id map)
+  split_uris.json      (frozen train/val/test citing_uri lists)
 
 SciBERT-encodes each citation node's context passage (CLS token).
 Citation nodes with no entry in all_contexts.json get a zero vector.
+
+IMPORTANT (leakage fix): only citation contexts whose `citing_uri` is in the
+FROZEN TRAIN split are encoded. Val/test citing papers' contexts are treated
+as if they don't exist here, so downstream feat_PCCon can never be built
+from — or contaminated by — val/test data. This mirrors real inference,
+where "future" citation contexts wouldn't be available anyway.
 
 Saves:
   feat_C.pt    FloatTensor [N_citations, 768]
@@ -32,6 +39,14 @@ citation_id: dict[str, int] = node_index["citation"]
 N_citations = len(citation_id)
 print(f"  Citation nodes: {N_citations:,}")
 
+# ── Load frozen split (leakage guard) ─────────────────────────────────────────
+print("Loading split_uris.json …")
+with open(OUT_DIR / "split_uris.json") as f:
+    split = json.load(f)
+train_citing_uris: set[str] = set(split["train"])
+print(f"  Train citing_uris: {len(train_citing_uris):,} "
+      f"(val={len(split['val']):,}, test={len(split['test']):,})")
+
 # ── Load contexts ─────────────────────────────────────────────────────────────
 print("Loading all_contexts.json …")
 with open("all_contexts.json") as f:
@@ -41,6 +56,7 @@ print(f"  Total entries: {len(all_contexts):,}")
 # ── Build (citation_uri → text) map ──────────────────────────────────────────
 cit_texts: dict[str, str] = {}
 skipped = 0
+skipped_not_train = 0
 for entry in all_contexts:
     citing_uri = entry.get("citing_uri", "").strip()
     citing_idx = entry.get("citing_idx")
@@ -48,14 +64,21 @@ for entry in all_contexts:
     if not citing_uri or citing_idx is None or not text:
         skipped += 1
         continue
+    # Leakage guard: only encode contexts belonging to the frozen TRAIN split.
+    # Val/test citing_uris are skipped here so their context text can never
+    # flow into feat_C.pt / feat_PCCon.pt.
+    if citing_uri not in train_citing_uris:
+        skipped_not_train += 1
+        continue
     cit_uri = citing_uri.replace("/paper/", "/citation/") + f"/{citing_idx}"
     if cit_uri not in citation_id:
         skipped += 1
         continue
     cit_texts[cit_uri] = text
 
-print(f"  Matched citation nodes : {len(cit_texts):,}")
-print(f"  Skipped entries        : {skipped:,}")
+print(f"  Matched citation nodes      : {len(cit_texts):,}")
+print(f"  Skipped (bad/missing entry) : {skipped:,}")
+print(f"  Skipped (not in train split): {skipped_not_train:,}")
 
 # ── Load SciBERT ──────────────────────────────────────────────────────────────
 print(f"Loading SciBERT on {DEVICE} …")
