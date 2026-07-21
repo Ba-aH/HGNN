@@ -23,6 +23,7 @@ configs/PP/**/
 configs/PPCon/**/
 configs/P+PP+PPCon/**/
 configs/P+PPCon/**/
+configs/PCCon/**/
 myoutfile
 
 # --- Checkpoints ---

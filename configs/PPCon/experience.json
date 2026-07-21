@@ -1,6 +1,6 @@
 {
   "data_root": "~/HGNN/shared/data_prep",
-  "output_dir": "~/HGNN/configs/PCCon/MLP_500",
+  "output_dir": "~/HGNN/configs/PPCon",
   "n_fp_layers": 2,     "note1": "number of LinearPerMetapath projection layers inside PaperTower. Each layer transforms the metapath features through a learned weight matrix.",
   "dropout": 0.5,       "note3": "randomly zeros 30% of activations during training inside PaperTower to prevent overfitting. Disabled at evaluation time",
   "input_drop": 0.5,    "note4": "randomly zeros 10% of input features during training inside PaperTower to prevent overfitting. Disabled at evaluation time",
