@@ -12,14 +12,6 @@ Propagation (identical pattern to step4):
 
 feat_PCCon[i] = mean SciBERT embedding of all contexts that cite paper i
 
-NOTE (leakage fix, no code change needed here): this script has no logic
-change because it just propagates whatever is in feat_C.pt. The leakage fix
-lives entirely in step5a, which now only encodes TRAIN-split citation
-contexts into feat_C.pt. As long as step5a was regenerated with the
-split_uris.json filter before this script runs, feat_PCCon.pt here is
-automatically train-only too. This script includes an extra sanity print
-comparing non-zero rows to feat_C.pt's non-zero rows so a stale/unfiltered
-feat_C.pt is easy to catch.
 
 Saves:
   feat_PCCon.pt    FloatTensor [N_total, 768]
