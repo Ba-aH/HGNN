@@ -27,6 +27,7 @@ configs/PPCon/**/
 configs/P+PP+PPCon/**/
 configs/P+PPCon/**/
 configs/PCCon/**/
+configs/acl200/**/
 myoutfile
 
 # --- Checkpoints ---
