@@ -255,6 +255,15 @@ def build_run(run_dir, root):
 
     test_every = test_curve.get("test_eval_every", 5) if test_curve else 5
 
+    best_val_recall10 = None
+    if best_epoch is not None:
+        for e in train_hist:
+            if e.get("epoch") == best_epoch and "Recall@10" in e:
+                best_val_recall10 = e["Recall@10"]
+                break
+
+    best_test_recall10 = best_test.get("Recall@10") if best_test else None
+
     print(f"Rendering plot for {rel} ...")
     plot_b64 = plot_single_run(exp_name, config, train_hist, test_hist, best_epoch)
 
@@ -269,8 +278,10 @@ def build_run(run_dir, root):
         "best_epoch": best_epoch,
         "total_time_h": total_time_h,
         "epochs_run": epochs_run,
+        "best_val_recall10": best_val_recall10,
         "best_test_mrr": best_test["MRR"] if best_test else None,
         "best_test_epoch": best_test["epoch"] if best_test else None,
+        "best_test_recall10": best_test_recall10,
         "test_every": test_every,
         "plot_b64": plot_b64,
         "config_html": build_config_table(config),
@@ -294,8 +305,10 @@ def build_summary_table(runs):
           <td class="s-name">{escape(r['exp_name'])}</td>
           <td class="s-num">{fmt(r['best_mrr'])}</td>
           <td class="s-num s-muted">ep {r['best_epoch'] if r['best_epoch'] is not None else '—'}</td>
+          <td class="s-num">{fmt(r['best_val_recall10'])}</td>
           <td class="s-num">{fmt(r['best_test_mrr'])}</td>
           <td class="s-num s-muted">ep {r['best_test_epoch'] if r['best_test_epoch'] is not None else '—'}</td>
+          <td class="s-num">{fmt(r['best_test_recall10'])}</td>
           <td class="s-num">{fmt(r['total_time_h'], 2)}h</td>
         </tr>""")
     return f"""
@@ -303,8 +316,8 @@ def build_summary_table(runs):
       <thead>
         <tr>
           <th>Group</th><th>Run</th>
-          <th>Best Val MRR</th><th></th>
-          <th>Best Test MRR</th><th></th>
+          <th>Best Val MRR</th><th></th><th>Val Recall@10</th>
+          <th>Best Test MRR</th><th></th><th>Test Recall@10</th>
           <th>Time</th>
         </tr>
       </thead>
@@ -322,6 +335,13 @@ def build_run_section(r):
           <div class="card-value">{fmt(r['best_mrr'])}</div>
           <div class="card-sub">epoch {r['best_epoch']}</div>
         </div>"""
+    if r["best_val_recall10"] is not None:
+        cards += f"""
+        <div class="card">
+          <div class="card-label">Val Recall@10</div>
+          <div class="card-value">{fmt(r['best_val_recall10'])}</div>
+          <div class="card-sub">at best-MRR epoch {r['best_epoch']}</div>
+        </div>"""
     if r["total_time_h"] is not None:
         cards += f"""
         <div class="card">
@@ -335,6 +355,13 @@ def build_run_section(r):
           <div class="card-label">Best Test MRR</div>
           <div class="card-value">{fmt(r['best_test_mrr'])}</div>
           <div class="card-sub">epoch {r['best_test_epoch']}</div>
+        </div>"""
+    if r["best_test_recall10"] is not None:
+        cards += f"""
+        <div class="card">
+          <div class="card-label">Test Recall@10</div>
+          <div class="card-value">{fmt(r['best_test_recall10'])}</div>
+          <div class="card-sub">at best-test-MRR epoch {r['best_test_epoch']}</div>
         </div>"""
 
     return f"""

@@ -29,7 +29,9 @@ configs/P+PPCon/**/
 configs/PCCon/**/
 configs/acl200/**/
 myoutfile
-
+shared/acl200_prep/acl200_with_id.csv
+shared/acl200_prep/all_contexts.json
+shared/acl200_prep/abstracts.json
 # --- Checkpoints ---
 checkpoints/
 checkpoints1/

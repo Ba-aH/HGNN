@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CiteKG — Extraction Statistics</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+.tooltip-anchor {
+  display:inline-flex;align-items:center;justify-content:center;
+  width:14px;height:14px;border-radius:50%;
+  background:#fee2e2;border:1px solid #fca5a5;
+  color:#dc2626;font-size:9px;font-weight:700;
+  cursor:default;position:relative;font-family:monospace;
+  flex-shrink:0;
+}
+.tooltip-box {
+  display:none;
+  position:absolute;bottom:calc(100% + 8px);left:50%;
+  transform:translateX(-50%);
+  width:260px;
+  background:#1a1d24;color:#e2e8f0;
+  font-size:11px;font-family:system-ui,sans-serif;
+  font-weight:400;text-transform:none;letter-spacing:0;
+  line-height:1.6;padding:10px 12px;border-radius:7px;
+  box-shadow:0 4px 16px rgba(0,0,0,.18);
+  z-index:100;white-space:normal;
+}
+.tooltip-box::after {
+  content:'';position:absolute;top:100%;left:50%;
+  transform:translateX(-50%);
+  border:5px solid transparent;border-top-color:#1a1d24;
+}
+.tooltip-anchor:hover .tooltip-box { display:block; }
+
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  background:#f5f6f8;color:#1a1d24;
+  font-family:system-ui,-apple-system,sans-serif;
+  font-size:14px;line-height:1.6;
+}
+
+/* ── header ── */
+.hdr{
+  position:sticky;top:0;z-index:20;
+  background:#fff;border-bottom:1px solid #e4e6eb;
+  padding:12px 28px;display:flex;align-items:center;gap:12px;
+  box-shadow:0 1px 3px rgba(0,0,0,.06);
+}
+.hdr-logo{
+  font-family:'JetBrains Mono','Fira Code',monospace;
+  font-size:11px;letter-spacing:.1em;
+  background:#eef3fe;border:1px solid #c7d8fc;
+  color:#2563eb;padding:3px 10px;border-radius:5px;font-weight:600;
+}
+.hdr-title{font-size:14px;font-weight:600;color:#1a1d24}
+.hdr-path{
+  font-family:'JetBrains Mono','Fira Code',monospace;
+  font-size:11px;color:#64748b;
+  background:#f1f3f7;border:1px solid #e2e5ec;
+  padding:3px 10px;border-radius:5px;
+}
+.hdr-right{margin-left:auto;display:flex;align-items:center;gap:10px}
+.hdr-ts{font-size:11px;color:#94a3b8;font-family:monospace}
+.btn-refresh{
+  font-size:12px;background:#fff;border:1px solid #d1d5db;
+  color:#374151;padding:5px 13px;border-radius:6px;cursor:pointer;
+  transition:background .15s,border-color .15s;font-weight:500;
+}
+.btn-refresh:hover{background:#f9fafb;border-color:#9ca3af}
+.badge-green{
+  font-size:11px;font-family:monospace;font-weight:600;
+  background:#ecfdf5;border:1px solid #a7f3d0;
+  color:#059669;padding:3px 10px;border-radius:5px;
+}
+.badge-red{
+  font-size:11px;font-family:monospace;font-weight:600;
+  background:#fef2f2;border:1px solid #fca5a5;
+  color:#dc2626;padding:3px 10px;border-radius:5px;
+}
+
+/* ── loading ── */
+#loading{
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  height:60vh;gap:14px;
+}
+.spinner{
+  width:30px;height:30px;
+  border:2px solid #e5e7eb;border-top-color:#2563eb;
+  border-radius:50%;animation:spin .75s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+#loading-msg{font-size:13px;color:#94a3b8;font-family:monospace}
+
+/* ── error ── */
+#error{
+  display:none;margin:40px 28px;
+  background:#fef2f2;border:1px solid #fca5a5;
+  border-radius:10px;padding:20px;
+  color:#b91c1c;font-family:monospace;font-size:13px;white-space:pre-wrap;
+}
+
+/* ── main ── */
+#main{display:none;padding:0 28px 56px}
+
+.section-label{
+  font-size:10px;font-weight:700;letter-spacing:.12em;
+  text-transform:uppercase;color:#94a3b8;
+  margin:28px 0 12px;
+}
+
+/* metric cards */
+.metric-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+  gap:10px;
+}
+.mc{
+  background:#fff;border:1px solid #e4e6eb;
+  border-radius:10px;padding:16px 18px;
+}
+.mc-label{
+  font-size:10px;font-family:monospace;text-transform:uppercase;
+  letter-spacing:.07em;color:#94a3b8;margin-bottom:8px;
+}
+.mc-value{
+  font-size:26px;font-weight:700;
+  font-family:'JetBrains Mono','Fira Code',monospace;line-height:1;
+}
+.mc-sub{font-size:11px;color:#94a3b8;margin-top:5px;font-family:monospace}
+
+/* chart cards */
+.chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:680px){.chart-grid{grid-template-columns:1fr}}
+.cc,.cc-full{
+  background:#fff;border:1px solid #e4e6eb;border-radius:10px;padding:18px 20px;
+}
+.cc-title{
+  font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;
+  color:#94a3b8;margin-bottom:14px;font-family:monospace;
+}
+
+/* legend */
+.legend{display:flex;flex-wrap:wrap;gap:12px;margin-top:12px}
+.li{display:flex;align-items:center;gap:6px;font-size:11px;color:#64748b}
+.ld{width:8px;height:8px;border-radius:2px;flex-shrink:0}
+
+/* table */
+.tbl-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{
+  text-align:left;padding:9px 14px;
+  font-family:monospace;font-size:10px;text-transform:uppercase;
+  letter-spacing:.07em;color:#94a3b8;
+  border-bottom:1px solid #e4e6eb;font-weight:600;
+  background:#fafafa;
+}
+td{
+  padding:9px 14px;border-bottom:1px solid #f1f3f6;
+  font-family:monospace;font-size:11px;color:#374151;
+}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:#f8fafc}
+.td-title{
+  font-family:system-ui,sans-serif;font-size:12px;color:#1a1d24;
+  max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.num{color:#2563eb;font-weight:700}
+
+.pill{
+  display:inline-block;padding:2px 7px;
+  border-radius:4px;font-size:10px;font-family:monospace;font-weight:600;
+}
+.pill-green{background:#ecfdf5;color:#059669;border:1px solid #a7f3d0}
+.pill-red  {background:#fef2f2;color:#dc2626;border:1px solid #fca5a5}
+.pill-amber{background:#fffbeb;color:#d97706;border:1px solid #fcd34d}
+.pill-gray {background:#f1f5f9;color:#64748b;border:1px solid #cbd5e1}
+
+/* warn panels */
+.warn-panel{
+  background:#fef2f2;border:1px solid #fca5a5;
+  border-radius:10px;padding:14px 16px;
+  max-height:220px;overflow-y:auto;
+}
+.warn-item{
+  font-family:monospace;font-size:11px;color:#b91c1c;
+  padding:5px 0;border-bottom:1px solid rgba(220,38,38,.1);
+}
+.warn-item:last-child{border-bottom:none}
+.warn-sub{font-size:10px;color:#f87171;margin-top:2px}
+
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-track{background:#f1f3f6}
+::-webkit-scrollbar-thumb{background:#d1d5db;border-radius:2px}
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  <span class="hdr-logo">CiteKG</span>
+  <span class="hdr-title">Extraction Statistics</span>
+  <span class="hdr-path" id="hdr-path">EXTRACTED_DIR</span>
+  <div class="hdr-right">
+    <span id="hdr-badge" style="display:none"></span>
+    <span class="hdr-ts" id="hdr-ts"></span>
+    <button class="btn-refresh" onclick="load()">↺ Refresh</button>
+  </div>
+</div>
+
+<div id="loading">
+  <div class="spinner"></div>
+  <div id="loading-msg">Scanning extracted folder...</div>
+</div>
+
+<div id="error"></div>
+
+<div id="main">
+
+  <div class="section-label">Overview</div>
+  <div class="metric-grid">
+    <div class="mc">
+      <div class="mc-label">Papers</div>
+      <div class="mc-value" id="m-papers" style="color:#2563eb">—</div>
+      <div class="mc-sub" id="m-missing"></div>
+    </div>
+    <div class="mc">
+      <div class="mc-label">Total Citations</div>
+      <div class="mc-value" id="m-cit" style="color:#059669">—</div>
+      <div class="mc-sub" id="m-avg"></div>
+    </div>
+    <div class="mc">
+      <div class="mc-label">LaTeX Formulas</div>
+      <div class="mc-value" id="m-latex" style="color:#7c3aed">—</div>
+      <div class="mc-sub" id="m-latex-sub"></div>
+    </div>
+    <div class="mc">
+  <div class="mc-label" style="display:flex;align-items:center;gap:6px">
+    Failed OCR
+    <span class="tooltip-anchor">?
+      <span class="tooltip-box">
+        Formula images (<img> tags) found in citation context windows
+        that LatexOCR could not convert to LaTeX. The raw &lt;img&gt; tag
+        survived into context.json instead of being replaced with
+        &lt;latex&gt;...&lt;/latex&gt;.
+      </span>
+    </span>
+  </div>
+  <div class="mc-value" id="m-failocr" style="color:#dc2626">—</div>
+  <div class="mc-sub" id="m-failocr-sub"></div>
+</div>
+    <div class="mc">
+      <div class="mc-label">Abstract Coverage</div>
+      <div class="mc-value" id="m-abstract" style="color:#d97706">—</div>
+      <div class="mc-sub" id="m-abstract-sub"></div>
+    </div>
+    <div class="mc">
+      <div class="mc-label">Title Coverage</div>
+      <div class="mc-value" id="m-title" style="color:#0891b2">—</div>
+      <div class="mc-sub" id="m-title-sub"></div>
+    </div>
+  </div>
+
+  <div class="section-label">Citation Breakdown</div>
+  <div class="chart-grid">
+    <div class="cc">
+      <div class="cc-title">Citation type — single vs multiple</div>
+      <div style="position:relative;height:190px">
+        <canvas id="c-type" role="img" aria-label="Donut: single vs multiple citations"></canvas>
+      </div>
+      <div class="legend" id="lg-type"></div>
+    </div>
+    <div class="cc">
+      <div class="cc-title">Marker format — numeric vs author-year</div>
+      <div style="position:relative;height:190px">
+        <canvas id="c-marker" role="img" aria-label="Donut: numeric vs author-year markers"></canvas>
+      </div>
+      <div class="legend" id="lg-marker"></div>
+    </div>
+  </div>
+
+  <div class="section-label">Citations per Paper — Distribution</div>
+  <div class="cc-full">
+    <div class="cc-title">Histogram — bucket size 5</div>
+    <div style="position:relative;height:210px">
+      <canvas id="c-hist" role="img" aria-label="Histogram of citations per paper"></canvas>
+    </div>
+  </div>
+
+  <div class="section-label">LaTeX Formula Detection</div>
+  <div class="chart-grid">
+    <div class="cc">
+      <div class="cc-title">Papers with vs without detected formulas</div>
+      <div style="position:relative;height:180px">
+        <canvas id="c-latex" role="img" aria-label="Bar: papers with and without formulas"></canvas>
+      </div>
+    </div>
+    <div class="cc">
+      <div class="cc-title">Top 20 papers by formula count</div>
+      <div style="position:relative;height:180px">
+        <canvas id="c-latex-top" role="img" aria-label="Horizontal bar: top papers by formula count"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-label">Top 20 Papers by Citation Count</div>
+  <div class="cc-full" style="padding:0;overflow:hidden">
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr>
+          <th>#</th><th>Paper ID</th><th>Title</th>
+          <th>Citations</th><th>LaTeX</th><th>Failed OCR</th><th>Abstract</th>
+        </tr></thead>
+        <tbody id="tb-top"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="failocr-section" style="display:none">
+    <div class="section-label">Failed OCR — surviving &lt;img&gt; tags</div>
+    <div class="warn-panel" id="failocr-list"></div>
+  </div>
+
+  <div id="missing-section" style="display:none">
+    <div class="section-label">Folders missing context.json</div>
+    <div class="warn-panel" id="missing-list"></div>
+  </div>
+
+</div>
+
+<script>
+const P = {
+  blue:   '#2563eb',
+  green:  '#059669',
+  amber:  '#d97706',
+  red:    '#dc2626',
+  purple: '#7c3aed',
+  teal:   '#0891b2',
+  gray:   '#e2e8f0',
+};
+
+const charts = {};
+
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
+function fmt(n){ return Number(n).toLocaleString() }
+function set(id,val){ const e=document.getElementById(id); if(e) e.textContent=val; }
+
+function donut(id, labels, values, colors){
+  if(charts[id]) charts[id].destroy();
+  charts[id] = new Chart(document.getElementById(id), {
+    type: 'doughnut',
+    data: { labels, datasets:[{ data:values, backgroundColor:colors, borderWidth:2, borderColor:'#fff', hoverOffset:4 }] },
+    options: {
+      responsive:true, maintainAspectRatio:false, cutout:'66%',
+      plugins:{
+        legend:{ display:false },
+        tooltip:{ callbacks:{ label: ctx=>{
+          const tot = ctx.dataset.data.reduce((a,b)=>a+b,0)||1;
+          return ` ${ctx.label}: ${fmt(ctx.raw)} (${Math.round(ctx.raw/tot*100)}%)`;
+        }}}
+      }
+    }
+  });
+}
+
+function legend(id, items, total){
+  document.getElementById(id).innerHTML = items.map(([label,color,val])=>{
+    const pct = total ? Math.round(val/total*100) : 0;
+    return `<span class="li"><span class="ld" style="background:${color}"></span>${esc(label)} — ${fmt(val)} (${pct}%)</span>`;
+  }).join('');
+}
+
+function load(){
+  document.getElementById('loading').style.display = 'flex';
+  document.getElementById('main').style.display    = 'none';
+  document.getElementById('error').style.display   = 'none';
+  set('loading-msg', 'Scanning extracted folder...');
+
+  fetch('/stats/data')
+    .then(r => { if(!r.ok) throw new Error(`HTTP ${r.status} — ${r.statusText}`); return r.json(); })
+    .then(render)
+    .catch(err => {
+      document.getElementById('loading').style.display = 'none';
+      const el = document.getElementById('error');
+      el.style.display = 'block';
+      el.textContent = `Failed to load /stats/data\n\n${err.message}\n\nCheck that stats_route.py is registered in app.py.`;
+    });
+}
+
+function render(d){
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('main').style.display    = 'block';
+
+  document.getElementById('hdr-ts').textContent = new Date().toLocaleString();
+
+  const badge = document.getElementById('hdr-badge');
+  badge.style.display = 'inline-block';
+  if(d.papers_missing > 0){
+    badge.className   = 'badge-red';
+    badge.textContent = `${fmt(d.papers_total)} loaded · ${fmt(d.papers_missing)} missing`;
+  } else {
+    badge.className   = 'badge-green';
+    badge.textContent = `${fmt(d.papers_total)} papers loaded`;
+  }
+
+  const n = d.papers_total;
+  set('m-papers',      fmt(n));
+  set('m-missing',     d.papers_missing > 0 ? `${d.papers_missing} folders missing context.json` : 'all context.json present');
+  set('m-cit',         fmt(d.total_citations));
+  set('m-avg',         `${d.avg_citations} avg / paper`);
+  set('m-latex',       fmt(d.total_latex));
+  set('m-latex-sub',   `in ${fmt(d.papers_with_latex)} papers`);
+  set('m-failocr',     fmt(d.total_failocr));
+  set('m-failocr-sub', `across ${fmt(d.papers_with_failocr)} papers`);
+  set('m-abstract',    n ? Math.round(d.papers_with_abstract/n*100)+'%' : '0%');
+  set('m-abstract-sub',`${fmt(d.papers_with_abstract)} / ${fmt(n)} papers`);
+  set('m-title',       n ? Math.round(d.papers_with_title/n*100)+'%' : '0%');
+  set('m-title-sub',   `${fmt(d.papers_with_title)} / ${fmt(n)} papers`);
+
+  donut('c-type',   ['Single','Multiple'],      [d.single_citations, d.multiple_citations], [P.blue, P.purple]);
+  legend('lg-type', [['Single',P.blue,d.single_citations],['Multiple',P.purple,d.multiple_citations]], d.total_citations);
+
+  donut('c-marker', ['Numeric [1]','Author-year'], [d.numeric_markers, d.authoryear_markers], [P.green, P.amber]);
+  legend('lg-marker',[['Numeric [1]',P.green,d.numeric_markers],['Author-year',P.amber,d.authoryear_markers]], d.numeric_markers+d.authoryear_markers);
+
+  if(charts['c-hist']) charts['c-hist'].destroy();
+  charts['c-hist'] = new Chart(document.getElementById('c-hist'), {
+    type: 'bar',
+    data: {
+      labels: d.histogram.labels,
+      datasets:[{ data:d.histogram.values, backgroundColor:'#bfdbfe', borderColor:P.blue, borderWidth:1 }]
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:false} },
+      scales:{
+        x:{ ticks:{ color:'#94a3b8', font:{family:'monospace',size:10}, maxRotation:45, autoSkip:true, maxTicksLimit:18 }, grid:{color:'#f1f5f9'} },
+        y:{ ticks:{ color:'#94a3b8', font:{family:'monospace',size:10} }, grid:{color:'#f1f5f9'} }
+      }
+    }
+  });
+
+  if(charts['c-latex']) charts['c-latex'].destroy();
+  charts['c-latex'] = new Chart(document.getElementById('c-latex'), {
+    type: 'bar',
+    data:{
+      labels:['With formulas','Without formulas'],
+      datasets:[{ data:[d.papers_with_latex, d.papers_without_latex], backgroundColor:['#ede9fe','#f1f5f9'], borderColor:[P.purple,'#cbd5e1'], borderWidth:1 }]
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:false} },
+      scales:{
+        x:{ ticks:{color:'#94a3b8',font:{size:11}}, grid:{color:'#f1f5f9'} },
+        y:{ ticks:{color:'#94a3b8',font:{family:'monospace',size:10}}, grid:{color:'#f1f5f9'} }
+      }
+    }
+  });
+
+  if(charts['c-latex-top']) charts['c-latex-top'].destroy();
+  const tl = d.top20_by_latex.filter(p=>p.latex>0).slice(0,20);
+  charts['c-latex-top'] = new Chart(document.getElementById('c-latex-top'), {
+    type: 'bar',
+    data:{
+      labels: tl.map(p => p.id.slice(0,16)+(p.id.length>16?'…':'')),
+      datasets:[{ data:tl.map(p=>p.latex), backgroundColor:'#ede9fe', borderColor:P.purple, borderWidth:1 }]
+    },
+    options:{
+      indexAxis:'y', responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:false} },
+      scales:{
+        x:{ ticks:{color:'#94a3b8',font:{family:'monospace',size:10}}, grid:{color:'#f1f5f9'} },
+        y:{ ticks:{color:'#64748b',font:{family:'monospace',size:9}},  grid:{display:false} }
+      }
+    }
+  });
+
+  const tbody = document.getElementById('tb-top');
+  tbody.innerHTML = '';
+  d.top20_by_citations.forEach((p,i) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="color:#94a3b8">${i+1}</td>
+      <td style="color:#64748b;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.id)}</td>
+      <td class="td-title" title="${esc(p.title)}">${esc(p.title)}</td>
+      <td class="num">${fmt(p.count)}</td>
+      <td>${p.latex   > 0 ? `<span class="pill pill-green">${p.latex}</span>`   : `<span style="color:#94a3b8">0</span>`}</td>
+      <td>${p.failocr > 0 ? `<span class="pill pill-red">${p.failocr}</span>`   : `<span style="color:#94a3b8">0</span>`}</td>
+      <td>${p.has_abstract ? `<span class="pill pill-green">yes</span>` : `<span class="pill pill-amber">no</span>`}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  const fs = document.getElementById('failocr-section');
+  if(d.top_failocr_items && d.top_failocr_items.length > 0){
+    fs.style.display = 'block';
+    document.getElementById('failocr-list').innerHTML = d.top_failocr_items.map(item=>`
+      <div class="warn-item">
+        <span style="color:#1a1d24">${esc(item.marker)}</span>
+        — ${item.count} &lt;img&gt; tag${item.count>1?'s':''} survived
+        <div class="warn-sub">${esc(item.paper)}</div>
+      </div>
+    `).join('');
+  } else { fs.style.display = 'none'; }
+
+  const ms = document.getElementById('missing-section');
+  if(d.missing_folders && d.missing_folders.length > 0){
+    ms.style.display = 'block';
+    document.getElementById('missing-list').innerHTML = d.missing_folders.map(f=>
+      `<div class="warn-item">${esc(f)}</div>`
+    ).join('');
+  } else { ms.style.display = 'none'; }
+}
+
+load();
+</script>
+</body>
+</html>

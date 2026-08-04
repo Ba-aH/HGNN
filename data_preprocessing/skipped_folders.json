@@ -1,0 +1,34 @@
+{
+  "skipped": [
+    {
+      "folder": "ARGORA_Orchestrated_Argumentation_for_Causally_Grounded_LLM_Reasoning_and_Decision_Making",
+      "timestamp": "2026-04-28T12:57:57.074725",
+      "reason": "Groq call failed on chunk 2/6: HTTPConnectionPool(host='localhost', port=1234): Read timed out. (read timeout=180)",
+      "partial_count": 54
+    },
+    {
+      "folder": "An_Extension_of_Argumentation_Structures_with_an_Objectification_of_Discussions",
+      "timestamp": "2026-04-28T14:07:39.414234",
+      "reason": "Groq call failed on chunk 1/1: LLM returned non-JSON: Expecting ',' delimiter: line 59 column 49 (char 1751)\nRaw: [\n  {\n    \"title\": \"Evaluating Arguments Based on Toulmin's Scheme\",\n    \"authors\": [\n      \"Verheij, B.\"\n    ],\n    \"year\": 2006,\n    \"venue\": \"Arguing on the Toulmin Model: New Essays in Argument Analysis and Evaluation\"\n  },\n  {\n    \"title\": \"DefLog: on the Logical Interpretation of Prima Facie J",
+      "partial_count": 0
+    },
+    {
+      "folder": "Evaluation of argument strength in attack graphs Foundations and semantics",
+      "timestamp": "2026-04-28T19:22:52.075609",
+      "reason": "Groq call failed on chunk 1/2: HTTPConnectionPool(host='localhost', port=1234): Read timed out. (read timeout=180)",
+      "partial_count": 0
+    },
+    {
+      "folder": "Evaluation-of-argument-strength-in-attack-graphs--Foun_2022_Artificial-Intel",
+      "timestamp": "2026-04-28T19:25:54.184286",
+      "reason": "Groq call failed on chunk 1/2: HTTPConnectionPool(host='localhost', port=1234): Read timed out. (read timeout=180)",
+      "partial_count": 0
+    },
+    {
+      "folder": "OBJECTIFICATION_OF_DISCUSSIONS_AND_DISPUTE_RESOLUTION_IN_ARGUMENTATION_LOGIC",
+      "timestamp": "2026-04-28T22:20:17.295519",
+      "reason": "Groq call failed on chunk 1/1: LLM returned non-JSON: Expecting ',' delimiter: line 99 column 57 (char 2826)\nRaw: [\n  {\n    \"title\": \"An Extension of Argumentation Structures with an Objectification of Discussions\",\n    \"authors\": [\n      \"Berestov, I.V.\"\n    ],\n    \"year\": 2019,\n    \"venue\": \"Vestnik Tomskogo gosudarstvennogo universiteta Filosofiya. Sotsiologiya. Politologiya Tomsk State University Journal of",
+      "partial_count": 0
+    }
+  ]
+}

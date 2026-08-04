@@ -1,0 +1,263 @@
+{
+  "name": "Pipeline 3 - KG Creation",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        2208,
+        -304
+      ],
+      "id": "39a3a20a-918c-4a3e-a11e-e6b33fbdf9f8",
+      "name": "When clicking 'Execute workflow'"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        3120,
+        -304
+      ],
+      "id": "f1c6e199-66cb-4cfa-a34c-69a71ac7dbc8",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:3000/checkpoint",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "folder",
+              "value": "={{ $json.folder ?? $('Loop Over Items').item.json.folders }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3808,
+        -304
+      ],
+      "id": "c23a0a5e-23d8-4bc0-948b-434a3fbc8602",
+      "name": "Save Checkpoint"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "folders",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        2864,
+        -304
+      ],
+      "id": "675c9c62-1bc2-40db-bbf9-cff845739196",
+      "name": "Split Out"
+    },
+    {
+      "parameters": {
+        "url": "http://127.0.0.1:3000/folders",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2656,
+        -304
+      ],
+      "id": "9e2a1a1f-4ef7-4c7a-ad7f-ed9a0782485f",
+      "name": "GET folders"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:3000/rml/convert",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "folder",
+              "value": "={{ $('Loop Over Items').item.json.folders }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3616,
+        -304
+      ],
+      "id": "da0b685f-ab50-49e5-bbf3-b6d2ffc29b09",
+      "name": "Convert to RDF"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "p2-cond-pipeline1",
+              "leftValue": "={{ $('Get Checkpoint').item.json.completed.includes($json.folders) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        3392,
+        -288
+      ],
+      "id": "6d56a3a8-77a5-4182-8ac9-58bf0979799c",
+      "name": "if already processed paper"
+    },
+    {
+      "parameters": {
+        "url": "http://127.0.0.1:3000/checkpoint",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2448,
+        -304
+      ],
+      "id": "7c018bb0-36a2-4ebe-b2e8-9fcee969eca1",
+      "name": "Get Checkpoint"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking 'Execute workflow'": {
+      "main": [
+        [
+          {
+            "node": "Get Checkpoint",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "if already processed paper",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Checkpoint": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Out": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET folders": {
+      "main": [
+        [
+          {
+            "node": "Split Out",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert to RDF": {
+      "main": [
+        [
+          {
+            "node": "Save Checkpoint",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "if already processed paper": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Convert to RDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Checkpoint": {
+      "main": [
+        [
+          {
+            "node": "GET folders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "abeced20-3cb0-49c6-bd58-9401090ed110",
+  "meta": {
+    "instanceId": "9f740556e2dce9932bf18e08ff6a0fde4eab9a9118bd59ff6c354f02410c1c85"
+  },
+  "id": "743R973wTyTJiOdc",
+  "tags": []
+}
