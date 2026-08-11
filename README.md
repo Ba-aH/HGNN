@@ -114,6 +114,76 @@ python train_domain_specific.py --config configs/P+PP/MLP_500/exp_PP_MLP_hidden5
 
 To reproduce a specific row of the results table, pick the matching config folder — e.g. `configs/P/`, `configs/PP/`, `configs/PPCon/`, `configs/P+PP/MLP_500/`, `configs/P+PPCon/`, `configs/P+PP+PPCon/`, or `configs/acl200/`. Checkpoints and training history (`best_model.pt`, `history.json`, `test_curve.json`) are written back into that same experiment folder.
 
+#### Configuration files
+
+Every `config.json` fully specifies one run — paths, model hyperparameters, and optimization settings — so a run can be reproduced (or modified) just by editing/pointing to a config, without touching any code. Example:
+
+```json
+{
+  "data_root": "~/HGNN/shared/acl200_prep",
+  "output_dir": "~/HGNN/configs/P+PP/acl200",
+  "experiment_name": "exp_PP_MLP_hidden500",
+  "feat_keys": ["P", "PP"],
+
+  "embed_dim": 768,
+  "hidden": 500,
+  "use_mlp": true,
+  "n_fp_layers": 2,
+  "num_heads": 1,
+  "act": "none",
+  "residual": true,
+
+  "dropout": 0.25,
+  "input_drop": 0.25,
+  "att_drop": 0.1,
+
+  "temperature": 0.07,
+  "batch_size": 128,
+  "max_length": 256,
+  "epochs": 35,
+  "patience": 35,
+  "eval_every": 1,
+  "test_eval_every": 5,
+
+  "lr_scibert": 2e-6,
+  "lr_head": 0.001,
+  "lr_paper": 0.001,
+
+  "seed": 42,
+  "gpu": 0,
+  "scibert_model_name": "allenai/scibert_scivocab_uncased"
+}
+```
+
+Key fields, grouped by what they control:
+
+| Field | Meaning |
+|---|---|
+| `data_root` | Path to the preprocessed dataset (output of the graph-building steps in [Section 2](#2-build-the-graph-and-propagate-features)) |
+| `output_dir` | Where checkpoints and logs for this run are written |
+| `experiment_name` | Name used for the run's output subfolder |
+| `feat_keys` | Which metapath features to use — any combination of `"P"`, `"PP"`, `"PC"` (e.g. `["P", "PP"]` reproduces the P+PP row) |
+| `embed_dim` | Final embedding size of both towers (kept fixed at 768) |
+| `hidden` | Hidden size of the per-metapath `LinearPerMetapath` projection and the fusion transformer |
+| `use_mlp` | Whether metapath features are projected through `LinearPerMetapath` (768 → `hidden`) before fusion, or fed directly into the transformer |
+| `n_fp_layers` | Number of `LinearPerMetapath` projection layers inside the Paper Module |
+| `num_heads` | Number of attention heads in the cross-metapath fusion transformer (`1` = no multi-head attention) |
+| `act` | Activation applied to attention scores before softmax (`none`, `sigmoid`, `relu`, `leaky_relu`) |
+| `residual` | Whether to add a skip connection from `mean(inputs)` into the fused representation |
+| `dropout` / `input_drop` / `att_drop` | Dropout on activations / input features / attention weights inside the Paper Module (train-time only) |
+| `temperature` | InfoNCE temperature; lower = sharper, more sensitive loss (0.07 is the standard contrastive-learning default) |
+| `batch_size` | Citation records per training batch |
+| `max_length` | Max tokens read by SciBERT per citation context |
+| `epochs` / `patience` | Max training epochs / early-stopping patience |
+| `eval_every` / `test_eval_every` | Validation / test evaluation frequency (in epochs) |
+| `lr_scibert` | Learning rate for SciBERT's own weights (kept very low to fine-tune gently rather than retrain) |
+| `lr_head` / `lr_paper` | Learning rate for the (randomly initialized) projection head and Paper Module weights |
+| `seed` | Random seed for reproducibility |
+| `gpu` | GPU index to train on |
+| `scibert_model_name` | HuggingFace model id used for the Context Module encoder |
+
+To run a new configuration, copy an existing `config.json`, adjust the fields above (most commonly `feat_keys`, `hidden`, and `experiment_name`), and pass its path to `--config`.
+
 ### 4. Evaluate
 
 ```bash
@@ -130,12 +200,6 @@ python configs/make_report.py
 
 Produces an HTML report summarizing Recall@10 / MRR across all experiment folders under `configs/`.
 
-## Trained Models
-
-Pretrained checkpoints for the best-performing configurations reported in the paper (ArgKG P+PP, ACL-200 P+PP+PC):
-
-- **Trained models**: [link]
-- **[link]**
 
 ## Rebuilding the KG from Raw Data
 
@@ -150,5 +214,3 @@ python app.py
 ```
 
 This starts the preprocessing service (reference cleaning, context extraction, RML mapping via Docker). Import and run `Pipeline 1`, `Pipeline 2`, and `Pipeline 3` (n8n workflow JSON files in this folder) in order.
-
-

@@ -1,2 +1,9 @@
-Proposed metapath set
-KeyTraversalSemantic meaningUseful for LCR?P—Raw paper feature (abstract or context-mean)Yes — always included as self-featurePPP→PDirect citation neighbours meanYes — papers you cite tend to be relevantPPPP→P→P2-hop citation chainYes — captures broader citation neighbourhoodPCP→CMean of context passages written by this paperMarginal — describes how this paper cites othersPCPP←C→PPapers co-cited in the same passage as this paperYes — strongest signalPCrPP→C←PPapers that share the same citing source paperYes — bibliographic coupling via context
+# Context Module (`context_tower/`)
+
+Encodes a citation context (the text surrounding a citation marker) into the same shared embedding space as the Paper Module, so the two can be compared directly during contrastive training.
+
+
+## Training
+
+SciBERT is fine-tuned at a very low learning rate (`lr_scibert`, preferrably equalt to `2e-6`) to gently adapt its pretrained representations, while the projection head trains at a higher rate (`lr_head`, preferrably equalt to `1e-3`). Both towers are optimized jointly with the InfoNCE contrastive loss.
+
