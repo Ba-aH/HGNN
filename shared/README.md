@@ -2,7 +2,7 @@
 
 This folder contains the two dataset preparation pipelines that turn a knowledge graph into the metapath features and frozen splits consumed by training. Each dataset (ArgKG and ACL-200) has its own pipeline, but both follow the same overall structure: build a graph → encode papers → propagate/pool features across metapaths → encode citation contexts → freeze the train/val/test split.
 
-The output of these pipelines — feature tensors, adjacency matrices, and split files — is what `data_root` in a training `config.json` should point to.
+The output of these pipelines: feature tensors, adjacency matrices, and split files  is what `data_root` in a training `config.json` should point to.
 
 ## `data_prep/` — ArgKG pipeline
 
