@@ -223,4 +223,5 @@ This starts the preprocessing service (reference cleaning, context extraction, R
 - **Nadia Yacoubi Ayadi**¹, nadia.yacoubi-ayadi@univ-lyon1.fr 
 
 ¹ Université Claude Bernard Lyon 1, CNRS, Ecole Centrale de Lyon, INSA Lyon, Université Lumière Lyon 2, LIRIS, UMR5205, 69622 Villeurbanne, France
+<br>
 ² Université de Tunis, ISGT, LR99ES04 BESTMOD, 2000, Le Bardo, Tunisia
