@@ -214,3 +214,13 @@ python app.py
 ```
 
 This starts the preprocessing service (reference cleaning, context extraction, RML mapping via Docker). Import and run `Pipeline 1`, `Pipeline 2`, and `Pipeline 3` (n8n workflow JSON files in this folder) in order.
+
+
+## Contributors
+
+- **Baha Eddine Hantous**¹˒² — bahaeddine.hantous@univ-lyon1.fr
+- **Bruno Yun**¹ — bruno.yun@univ-lyon1.fr 
+- **Nadia Yacoubi Ayadi**¹ — nadia.yacoubi-ayadi@univ-lyon1.fr 
+
+¹ Université Claude Bernard Lyon 1, CNRS, Ecole Centrale de Lyon, INSA Lyon, Université Lumière Lyon 2, LIRIS, UMR5205, 69622 Villeurbanne, France
+² Université de Tunis, ISGT, LR99ES04 BESTMOD, 2000, Le Bardo, Tunisia
