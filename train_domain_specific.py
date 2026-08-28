@@ -544,7 +544,7 @@ def main():
     summary = {
         "best_mrr":                best_mrr,
         "best_epoch":              best_epoch,
-        "total_training_time_h":   round(total / 3600, 4),  # e.g. 1.2345 hours
+        "total_training_time_h":   round(total / 3600, 4),  
         "epochs_run":              len(history),
         "history":                 history,
         "test_history":            test_history,  # same data as test_curve.json, duplicated here for convenience

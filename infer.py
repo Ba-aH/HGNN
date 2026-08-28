@@ -15,8 +15,10 @@ Usage:
 
 python infer.py   --checkpoint ~/HGNN/checkpoints/20260623_150134/best_model.pt   --ttl_path ~/HGNN/shared/data_prep/merged-kg.ttl   --query "n and formal comparisons of semantics. This paper focuses on the evaluation of arguments in weighted bipolar argumentation graphs. It extends our previous works on axiomatic foundations of semantics for unipolar graphs (support graphs [cite] and attack graphs [cite]). It defines principles that a semantics would satisfy in a bipolar setting. Such principles are very useful for judging and understanding the underpinnings of semantics, and also for comparing semantics of the same family, and those of different families. Some of the proposed principles are simple combinations of those proposed in [25, 26] Others are new and show how support and attack might be aggregated. The second contribution of the paper consists of analyzing existing semantics against the principles. The main conclusion is that extension semantics do not harness the potential of support relation. Indeed, when the attack relation is empty, the existing semantics declare all (supported, non-supported) arguments of a graph as equally accepted. Weighted semantics take into account supporters in this particular case,however they violate some key principles. The third contribution of the paper is the definition of a novel weigh"
 
-python infer.py   --checkpoint /home/jovyan/HGNN/configs/P+PP/no_MLP/exp_PP_noMLP/best_model.pt   --ttl_path ~/HGNN/shared/data_prep/merged-kg.ttl   --query "In assumption-based argumentation frameworks for default reasoning, arguments are constructed from a given knowledge base using assumptions that can be defeated by other assumptions. This approach integrates ideas from Dung’s abstract argumentation with default logic, allowing for non-monotonic reasoning through the computation of acceptable sets of assumptions. A key challenge lies in determining the computational complexity of finding admissible, preferred, or stable extensions in such frameworks, which often involves analyzing the tractability of credulous and skeptical acceptance problems under different semantics."
-
+python infer.py `
+  --checkpoint "configs\P+PP\MLP_500\exp_PP_MLP_hidden500(run2)\best_model.pt" `
+  --ttl_path "shared\data_prep\merged-kg.ttl" `
+  --query "In assumption-based argumentation frameworks for default reasoning, arguments are constructed from a given knowledge base using assumptions that can be defeated by other assumptions. This approach integrates ideas from Dung's abstract argumentation with default logic, allowing for non-monotonic reasoning through the computation of acceptable sets of assumptions. A key challenge lies in determining the computational complexity of finding admissible, preferred, or stable extensions in such frameworks, which often involves analyzing the tractability of credulous and skeptical acceptance problems under different semantics."
 """
 
 import os
@@ -80,7 +82,7 @@ def load_models(ckpt_path, device):
     paper_tower = PaperTower(
         feat_keys=["P", "PP"], 
         nfeat=768,
-        hidden=a.get("hidden", 768), 
+        hidden=a.get("hidden", 500), 
         embed_dim=a.get("embed_dim", 768),
         n_fp_layers=a.get("n_fp_layers", 2),
         dropout=a.get("dropout", 0.3), 
@@ -89,7 +91,7 @@ def load_models(ckpt_path, device):
         num_heads=1,
         act='none',
         residual=True,
-        use_mlp=False,
+        use_mlp=True,
     ).to(device)
     paper_tower.load_state_dict(ckpt["paper_tower"])
     paper_tower.eval()

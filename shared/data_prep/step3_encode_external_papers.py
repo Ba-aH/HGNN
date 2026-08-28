@@ -6,12 +6,18 @@ Reads:
   node_index.json
   external_ids.pt
   paper_uris.json
+  split_uris.json    (frozen train/val/test citing_uri lists — LEAKAGE GUARD)
 
 For each external paper:
-  - Collect all c4o:hasContext passage texts from its
-    citekg:hasCitationContext citation nodes
-  - If ≥1 context: feature = mean SciBERT(CLS) over passages
-  - If 0 contexts (Category C): feature = zeros(768)
+  - Collect c4o:hasContext passage texts from its citekg:hasCitationContext
+    citation nodes, but ONLY for citation nodes whose citing paper
+    (cito:hasCitingEntity) is in the FROZEN TRAIN split. Val/test citing
+    papers' contexts are treated as if they don't exist here, so
+    feat_external_papers.pt (which becomes feat_P for external papers) can
+    never be built from — or contaminated by — val/test citation contexts.
+    This mirrors the guard already applied in step5a_encode_citations.py.
+  - If ≥1 train context: feature = mean SciBERT(CLS) over those passages
+  - If 0 train contexts (Category C): feature = zeros(768)
 
 Saves:
   feat_external_papers.pt      FloatTensor [N_external, 768]
@@ -56,19 +62,52 @@ external_uris    = [paper_uri_list[i] for i in external_int_ids]
 N_external       = len(external_uris)
 print(f"  External papers: {N_external}")
 
-# ── Build URI → context passages map from the graph ──────────────────────────
-# citekg:hasCitationContext on the cited paper points to citation nodes
-# each citation node has c4o:hasContext with the passage text
-print("Collecting context passages for external papers …")
+# ── Load frozen split (leakage guard) ─────────────────────────────────────────
+# Same guard as step5a_encode_citations.py: only citation contexts whose
+# citing paper is in the FROZEN TRAIN split are allowed to contribute to
+# feat_external_papers.pt. Without this, an external paper's identity
+# feature would be built from val/test citation context text, which is
+# exactly what the model is later asked to retrieve against.
+print("Loading split_uris.json …")
+with open(OUT_DIR / "split_uris.json") as f:
+    split = json.load(f)
+train_citing_uris: set[str] = set(split["train"])
+print(f"  Train citing_uris: {len(train_citing_uris):,} "
+      f"(val={len(split['val']):,}, test={len(split['test']):,})")
 
+# ── Build citation node → citing paper map (for the train-only filter) ───────
+# Mirrors adj_CP_citing construction in step1_build_graph.py
+# (cito:hasCitingEntity : citation_node -> citing_paper)
+print("Collecting citation-node → citing-paper map …")
 from rdflib import URIRef
+
+CITO = Namespace("http://purl.org/spar/cito/")
+cit_node_to_citing_uri: dict = {}
+for cit_node, _, citing_paper in g.triples((None, CITO.hasCitingEntity, None)):
+    cit_node_to_citing_uri[cit_node] = str(citing_paper)
+
+# ── Build URI → context passages map from the graph (TRAIN-ONLY) ─────────────
+# citekg:hasCitationContext on the cited paper points to citation nodes;
+# each citation node has c4o:hasContext with the passage text. A passage is
+# only kept if its citation node's citing paper is in train_citing_uris.
+print("Collecting context passages for external papers (train-only) …")
 
 ext_contexts: dict[str, list[str]] = {uri: [] for uri in external_uris}
 ext_uri_set = set(external_uris)
 
+n_skipped_not_train = 0
+n_skipped_no_citing  = 0
+
 for paper_uri_str in external_uris:
     paper_ref = URIRef(paper_uri_str)
     for _, _, cit_node in g.triples((paper_ref, CITEKG.hasCitationContext, None)):
+        citing_uri = cit_node_to_citing_uri.get(cit_node)
+        if citing_uri is None:
+            n_skipped_no_citing += 1
+            continue
+        if citing_uri not in train_citing_uris:
+            n_skipped_not_train += 1
+            continue
         # Get the passage text from this citation node
         for _, _, ctx_lit in g.triples((cit_node, C4O.hasContext, None)):
             text = str(ctx_lit).strip()
@@ -77,8 +116,10 @@ for paper_uri_str in external_uris:
 
 context_counts = {uri: len(v) for uri, v in ext_contexts.items()}
 n_with_context = sum(1 for v in context_counts.values() if v > 0)
-print(f"  External with ≥1 context : {n_with_context}")
-print(f"  External with 0 contexts (Category C) : {N_external - n_with_context}")
+print(f"  External with ≥1 train context : {n_with_context}")
+print(f"  External with 0 train contexts (Category C) : {N_external - n_with_context}")
+print(f"  Contexts skipped (not in train split) : {n_skipped_not_train:,}")
+print(f"  Contexts skipped (no citing entity found) : {n_skipped_no_citing:,}")
 
 # ── Load SciBERT ──────────────────────────────────────────────────────────────
 print(f"Loading SciBERT on {DEVICE} …")

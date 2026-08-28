@@ -15,6 +15,7 @@ shared/data_prep/context_flat.json
 shared/acl200_prep/*.pt
 shared/acl200_prep/all_contexts.json
 shared/acl200_prep/merged-kg.ttl
+shared/peer-read_prep/merged-kg.ttl
 configs/P+PP/no_MLP/exp_PP_noMLP
 configs/P+PP/no_MLP/**/
 configs/P+PP/MLP_500/**/
