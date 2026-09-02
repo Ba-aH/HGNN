@@ -1,7 +1,7 @@
 import json
 import pandas as pd
 
-with open("all_contexts.json", "r", encoding="utf-8") as f:
+with open("all_contexts_fixed.json", "r", encoding="utf-8") as f:
     data = json.load(f)
 
 df = pd.DataFrame(data)

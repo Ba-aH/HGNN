@@ -9,13 +9,16 @@ shared/data_prep/merged-kg.ttl
 
 # --- Large data files (do not push) ---
 shared/data_prep/*.pt
-shared/data_prep/all_contexts.json
 shared/data_prep/merged-kg.ttl
-shared/data_prep/context_flat.json
+shared/data_prep/*.json
+
+
 shared/acl200_prep/*.pt
 shared/acl200_prep/all_contexts.json
 shared/acl200_prep/merged-kg.ttl
 shared/peer-read_prep/merged-kg.ttl
+
+
 configs/P+PP/no_MLP/exp_PP_noMLP
 configs/P+PP/no_MLP/**/
 configs/P+PP/MLP_500/**/
